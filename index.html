@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ecolab Barcode Generator + Verified Delivery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Ecolab Barcode Generator</h1>
+        <p>Generate professional barcodes/QR codes + verify delivery</p>
+      </div>
+      <span class="badge">v2 Verified</span>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>Generator Panel</h2>
+        <div class="controls">
+          <label for="codeType">Code type</label>
+          <select id="codeType">
+            <option value="CODE128">Code 128</option>
+            <option value="CODE39">Code 39</option>
+            <option value="EAN13">EAN-13</option>
+            <option value="EAN8">EAN-8</option>
+            <option value="UPC">UPC-A</option>
+            <option value="ITF14">ITF</option>
+            <option value="QR">QR Code</option>
+          </select>
+        </div>
+
+        <div id="inputContainer" class="input-stack"></div>
+        <button id="addCardBtn" class="btn ghost">+ Add Card</button>
+      </section>
+
+      <section class="card">
+        <h2>Shipment Manager</h2>
+        <form id="shipmentForm" class="form-grid">
+          <input id="shipmentId" placeholder="Shipment ID" required />
+          <input id="customerName" placeholder="Customer Name" required />
+          <input id="address" placeholder="Delivery Address" required />
+          <button class="btn">Create Shipment</button>
+        </form>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="shipmentTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card wide">
+        <h2>Ecolab Verified Delivery</h2>
+        <form id="verifyForm" class="form-grid verify-grid">
+          <select id="verifyShipmentId" required>
+            <option value="">Select shipment</option>
+          </select>
+          <input id="receiverName" placeholder="Receiver Name" required />
+          <input id="receiverOtp" placeholder="OTP (6 digits)" maxlength="6" required />
+          <input id="geoTag" placeholder="Geo Tag (City, State)" required />
+          <textarea id="signatureText" placeholder="Type digital signature / note" required></textarea>
+          <button class="btn success">Mark as Verified Delivered</button>
+        </form>
+
+        <div class="inline-actions">
+          <button id="generateOtpBtn" class="btn ghost">Generate OTP</button>
+          <span id="otpPreview" class="otp-preview">OTP: ------</span>
+        </div>
+
+        <div id="deliveryLog" class="log"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Built for Ecolab delivery operations</p>
+    </footer>
+
+    <template id="inputCardTemplate">
+      <article class="input-card">
+        <div class="card-header">
+          <span class="label">Input</span>
+          <div class="mode-toggle">
+            <button class="mode-btn active" data-mode="BC">BC</button>
+            <button class="mode-btn" data-mode="QR">QR</button>
+          </div>
+        </div>
+        <input class="code-input" placeholder="Enter value..." />
+        <div class="output"></div>
+      </article>
+    </template>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
