@@ -33,6 +33,215 @@ p {
   color: #94a3b8;
 }
 
+.section-hint {
+  font-size: 0.88rem;
+  color: #94a3b8;
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+.section-hint code {
+  font-size: 0.82rem;
+  background: #1e293b;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: #e2e8f0;
+}
+
+.paste-label {
+  display: block;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  margin-bottom: 6px;
+}
+
+.json-paste {
+  width: 100%;
+  min-height: 160px;
+  margin-bottom: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.json-import-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.file-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.file-label input[type="file"] {
+  position: absolute;
+  width: 0.1px;
+  height: 0.1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.file-label span {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.parse-error {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #450a0a;
+  border: 1px solid #7f1d1d;
+  color: #fecaca;
+  font-size: 0.88rem;
+}
+
+.json-saved-panel {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0b1220;
+}
+
+.json-saved-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+}
+
+.saved-panel-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.saved-panel-hint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.saved-panel-hint code {
+  font-size: 0.72rem;
+  background: #1e293b;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.json-saved-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.json-saved-row select {
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.save-override-label {
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.save-override-input {
+  width: 100%;
+  max-width: 320px;
+  margin-bottom: 6px;
+}
+
+.save-status {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: #86efac;
+}
+
+.save-status.is-error {
+  color: #fecaca;
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.json-barcode-mount {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.json-barcode-row {
+  min-width: 0;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px;
+  background: #0b1220;
+}
+
+.json-barcode-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+  line-height: 1.3;
+}
+
+.json-barcode-output {
+  min-height: 80px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.json-barcode-output svg,
+.json-barcode-output img,
+.json-barcode-output canvas {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
 .badge {
   background: #22c55e;
   color: #052e16;
@@ -44,9 +253,15 @@ p {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   padding: 16px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.wide {
+  grid-column: 1 / -1;
 }
 
 .card {
@@ -56,12 +271,7 @@ p {
   padding: 16px;
 }
 
-.wide {
-  grid-column: 1 / -1;
-}
-
-.controls,
-.form-grid {
+.controls {
   display: grid;
   gap: 10px;
 }
@@ -90,7 +300,7 @@ textarea {
 }
 
 textarea {
-  min-height: 74px;
+  min-height: 80px;
   resize: vertical;
 }
 
@@ -104,10 +314,6 @@ textarea {
   font-weight: 600;
 }
 
-.btn.success {
-  background: #16a34a;
-}
-
 .btn.ghost {
   background: #1e293b;
 }
@@ -119,6 +325,7 @@ textarea {
 }
 
 .input-card {
+  min-width: 0;
   border: 1px solid #334155;
   border-radius: 10px;
   padding: 10px;
@@ -160,78 +367,27 @@ textarea {
 .output {
   min-height: 100px;
   margin-top: 10px;
-  display: grid;
-  place-items: center;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
   background: #fff;
   border-radius: 10px;
   padding: 10px;
-}
-
-.table-wrap {
-  margin-top: 12px;
   overflow-x: auto;
+  overflow-y: visible;
 }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-th,
-td {
-  border-bottom: 1px solid #1f2937;
-  text-align: left;
-  padding: 10px 8px;
-  font-size: 0.9rem;
-}
-
-.status {
-  padding: 4px 8px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  display: inline-block;
-}
-
-.status.created {
-  background: #1d4ed8;
-}
-
-.status.verified {
-  background: #15803d;
-}
-
-.verify-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.verify-grid textarea,
-.verify-grid button {
-  grid-column: 1 / -1;
-}
-
-.inline-actions {
-  margin-top: 10px;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.otp-preview {
-  color: #fcd34d;
-  font-weight: 600;
-}
-
-.log {
-  margin-top: 12px;
-  display: grid;
-  gap: 8px;
-}
-
-.log-item {
-  border: 1px solid #334155;
-  border-radius: 10px;
-  padding: 10px;
-  background: #0b1220;
+.output svg,
+.output img,
+.output canvas {
+  max-width: 100%;
+  height: auto;
+  display: block;
 }
 
 .footer {
@@ -239,11 +395,8 @@ td {
   color: #64748b;
 }
 
-@media (max-width: 960px) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
-  .verify-grid {
+@media (max-width: 640px) {
+  .json-barcode-mount {
     grid-template-columns: 1fr;
   }
 }

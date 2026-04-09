@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ecolab Barcode Generator + Verified Delivery</title>
+    <title>Ecolab Barcode Generator</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,9 +18,9 @@
     <header class="topbar">
       <div>
         <h1>Ecolab Barcode Generator</h1>
-        <p>Generate professional barcodes/QR codes + verify delivery</p>
+        <p>Create barcodes from typed values or from JSON (paste or upload)</p>
       </div>
-      <span class="badge">v2 Verified</span>
+      <span class="badge">Generator</span>
     </header>
 
     <main class="grid">
@@ -43,49 +43,60 @@
         <button id="addCardBtn" class="btn ghost">+ Add Card</button>
       </section>
 
-      <section class="card">
-        <h2>Shipment Manager</h2>
-        <form id="shipmentForm" class="form-grid">
-          <input id="shipmentId" placeholder="Shipment ID" required />
-          <input id="customerName" placeholder="Customer Name" required />
-          <input id="address" placeholder="Delivery Address" required />
-          <button class="btn">Create Shipment</button>
-        </form>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Customer</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="shipmentTableBody"></tbody>
-          </table>
-        </div>
-      </section>
-
       <section class="card wide">
-        <h2>Ecolab Verified Delivery</h2>
-        <form id="verifyForm" class="form-grid verify-grid">
-          <select id="verifyShipmentId" required>
-            <option value="">Select shipment</option>
-          </select>
-          <input id="receiverName" placeholder="Receiver Name" required />
-          <input id="receiverOtp" placeholder="OTP (6 digits)" maxlength="6" required />
-          <input id="geoTag" placeholder="Geo Tag (City, State)" required />
-          <textarea id="signatureText" placeholder="Type digital signature / note" required></textarea>
-          <button class="btn success">Mark as Verified Delivered</button>
-        </form>
-
-        <div class="inline-actions">
-          <button id="generateOtpBtn" class="btn ghost">Generate OTP</button>
-          <span id="otpPreview" class="otp-preview">OTP: ------</span>
+        <h2>JSON → Barcodes</h2>
+        <p class="section-hint">
+          Paste JSON or choose a file, then <strong>Generate barcodes</strong>. NSAP payloads
+          use <code>ShipmentNumber</code> once, then <code>DeliveryNumber</code> per delivery, then per
+          <code>ShipmentDeliveryItemId</code> (fallback <code>LineNumber</code>):
+          seals, batch (hidden when <code>ContainerType</code> is <code>BULK</code>), storage, <code>GTIN</code>, <code>EANNumber</code>, <code>YSLDPackageCode</code>,
+          <code>ProductNumber</code>, and slash composites
+          <code>EquipmentNumber/ProductNumber</code>, <code>…/EANNumber</code>, <code>…/GTIN</code>,
+          <code>…/FormulaCode</code> (both sides non-empty). Any other JSON is scanned for primitives (depth limit).
+        </p>
+        <label for="jsonPaste" class="paste-label">Paste JSON</label>
+        <textarea
+          id="jsonPaste"
+          class="json-paste"
+          rows="10"
+          spellcheck="false"
+          placeholder='{ "ShipmentDetail": { ... }, ... }'
+        ></textarea>
+        <div class="json-import-row">
+          <label class="file-label">
+            <input type="file" id="jsonFile" accept=".json,application/json" />
+            <span>Choose JSON file</span>
+          </label>
         </div>
-
-        <div id="deliveryLog" class="log"></div>
+        <div class="json-saved-panel">
+          <div class="json-saved-head">
+            <span class="saved-panel-title">Saved JSON (this browser)</span>
+            <span class="saved-panel-hint">Stored by <code>ShipmentNumber</code> from <code>ShipmentDetail</code></span>
+          </div>
+          <div class="json-saved-row">
+            <select id="savedJsonSelect" aria-label="Saved shipments">
+              <option value="">Select saved shipment…</option>
+            </select>
+            <button type="button" id="jsonLoadSavedBtn" class="btn ghost">Load &amp; generate</button>
+            <button type="button" id="jsonSaveBtn" class="btn ghost">Save current JSON</button>
+            <button type="button" id="jsonDeleteSavedBtn" class="btn ghost">Delete selected</button>
+          </div>
+          <label for="saveShipmentOverride" class="paste-label save-override-label">Shipment # override (only if JSON has no ShipmentNumber)</label>
+          <input
+            type="text"
+            id="saveShipmentOverride"
+            class="save-override-input"
+            placeholder="e.g. DRX0335879"
+            autocomplete="off"
+          />
+          <p id="jsonSaveStatus" class="save-status" hidden></p>
+        </div>
+        <div class="inline-actions">
+          <button type="button" id="jsonGenerateBtn" class="btn">Generate barcodes</button>
+          <button type="button" id="jsonClearBtn" class="btn ghost">Clear results</button>
+        </div>
+        <div id="jsonError" class="parse-error" hidden></div>
+        <div id="jsonBarcodeMount" class="json-barcode-mount"></div>
       </section>
     </main>
 
