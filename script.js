@@ -4,6 +4,9 @@ const addCardBtn = document.getElementById("addCardBtn");
 const codeTypeSelect = document.getElementById("codeType");
 const jsonPaste = document.getElementById("jsonPaste");
 const jsonFile = document.getElementById("jsonFile");
+const jsonFileRemarks = document.getElementById("jsonFileRemarks");
+const jsonFileMetaName = document.getElementById("jsonFileMetaName");
+const jsonFileMetaSize = document.getElementById("jsonFileMetaSize");
 const jsonGenerateBtn = document.getElementById("jsonGenerateBtn");
 const jsonClearBtn = document.getElementById("jsonClearBtn");
 const jsonExportSelect = document.getElementById("jsonExportSelect");
@@ -855,9 +858,43 @@ jsonExportSelect.addEventListener("change", () => {
   jsonExportSelect.value = "";
 });
 
+function hideJsonFileRemarks() {
+  if (!jsonFileRemarks) return;
+  jsonFileRemarks.hidden = true;
+}
+
 jsonPaste.addEventListener("input", () => {
+  hideJsonFileRemarks();
   updateJsonExportSelect();
 });
+
+function formatJsonFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+if (jsonFile) {
+  jsonFile.addEventListener("click", () => {
+    jsonFile.value = "";
+    hideJsonFileRemarks();
+  });
+
+  jsonFile.addEventListener("change", () => {
+    if (!jsonFileRemarks || !jsonFileMetaName || !jsonFileMetaSize) return;
+    const f = jsonFile.files && jsonFile.files[0];
+    if (!f) {
+      hideJsonFileRemarks();
+      return;
+    }
+    jsonFileMetaName.textContent = f.name;
+    const typePart = f.type ? ` · ${f.type}` : "";
+    jsonFileMetaSize.textContent = `(${formatJsonFileSize(f.size)}${typePart})`;
+    jsonFileRemarks.hidden = false;
+  });
+}
 
 jsonSaveBtn.addEventListener("click", () => {
   showSaveStatus("");
@@ -917,6 +954,8 @@ jsonLoadSavedBtn.addEventListener("click", () => {
     return;
   }
   jsonPaste.value = entry.text;
+  jsonFile.value = "";
+  hideJsonFileRemarks();
   runJsonGenerate();
   showSaveStatus(`Loaded “${key}” and regenerated barcodes.`);
 });

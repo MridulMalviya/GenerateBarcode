@@ -78,6 +78,75 @@ p {
   margin-bottom: 12px;
 }
 
+.json-file-remarks[hidden] {
+  display: none !important;
+}
+
+.json-file-remarks {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  border-left: 3px solid #22c55e;
+  background: #0b1220;
+  display: block;
+}
+
+.json-file-remarks-title {
+  margin: 0 0 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #bbf7d0;
+}
+
+.json-file-ack-lead {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #cbd5e1;
+}
+
+.json-file-meta {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: #cbd5e1;
+  word-break: break-all;
+}
+
+.json-file-meta-label {
+  color: #94a3b8;
+  margin-right: 6px;
+}
+
+.json-file-meta-size {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.json-file-remarks-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+
+.json-file-remarks-list li {
+  margin-bottom: 6px;
+}
+
+.json-file-remarks-list li:last-child {
+  margin-bottom: 0;
+}
+
+.json-file-remarks-list code {
+  font-size: 0.76rem;
+  background: #1e293b;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #e2e8f0;
+}
+
 .file-label {
   position: relative;
   display: inline-flex;

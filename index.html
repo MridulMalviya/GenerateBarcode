@@ -69,6 +69,34 @@
             <span>Choose JSON file</span>
           </label>
         </div>
+        <div
+          id="jsonFileRemarks"
+          class="json-file-remarks"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          hidden
+        >
+          <p class="json-file-remarks-title">Acknowledgment — JSON file received</p>
+          <p class="json-file-ack-lead">
+            Your file is attached for this session. Click <strong>Generate barcodes</strong> to load it into
+            the editor and create barcodes.
+          </p>
+          <p class="json-file-meta">
+            <span class="json-file-meta-label">Selected:</span>
+            <span id="jsonFileMetaName"></span>
+            <span id="jsonFileMetaSize" class="json-file-meta-size"></span>
+          </p>
+          <ul class="json-file-remarks-list">
+            <li>
+              NSAP payloads use <code>ShipmentDetail</code>, <code>ShipmentDeliveryDetails</code>, and
+              <code>ShipmentDeliveryItemsDetails</code>; other JSON is scanned for values.
+            </li>
+            <li>
+              After loading, use <strong>Download</strong> → JSON or the saved-shipment panel to keep a copy.
+            </li>
+          </ul>
+        </div>
         <div class="json-saved-panel">
           <div class="json-saved-head">
             <span class="saved-panel-title">Saved JSON (this browser)</span>
