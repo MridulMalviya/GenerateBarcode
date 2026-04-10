@@ -724,7 +724,8 @@ function renderJsonBarcodeGrid(entries) {
   jsonBarcodeMount.innerHTML = "";
   const format = codeTypeSelect.value;
   let prevBlock = null;
-  for (const { label, value } of entries) {
+  for (let i = 0; i < entries.length; i += 1) {
+    const { label, value } = entries[i];
     const blockKey = jsonBarcodeBlockKey(label);
     if (prevBlock !== null && shouldInsertBarcodeItemGap(prevBlock, blockKey)) {
       const gapRow = document.createElement("div");
@@ -736,16 +737,38 @@ function renderJsonBarcodeGrid(entries) {
 
     const row = document.createElement("div");
     row.className = "json-barcode-row";
+    row.dataset.entryIndex = String(i);
     const lab = document.createElement("div");
     lab.className = "json-barcode-label";
     const groupKey = jsonBarcodeGroupKey(label);
     lab.dataset.bcGroup = groupKey;
     lab.style.setProperty("--label-hue", String(hueForBarcodeGroup(groupKey)));
     lab.textContent = label;
+    const valueWrap = document.createElement("div");
+    valueWrap.className = "json-barcode-value";
+    const valueLbl = document.createElement("label");
+    valueLbl.className = "json-barcode-value-label";
+    valueLbl.htmlFor = `json-barcode-value-${i}`;
+    valueLbl.textContent = "Encoded value (editable)";
+    const valueInput = document.createElement("textarea");
+    valueInput.id = `json-barcode-value-${i}`;
+    valueInput.className = "json-barcode-value-text";
+    valueInput.value = String(value ?? "");
+    valueInput.rows = Math.min(6, Math.max(2, String(value ?? "").split("\n").length));
+    valueInput.spellcheck = false;
+    valueInput.setAttribute("aria-label", "Encoded value; edit to update barcode");
+    valueWrap.append(valueLbl, valueInput);
     const out = document.createElement("div");
     out.className = "json-barcode-output";
     drawBarcode(out, value, format);
-    row.append(lab, out);
+    valueInput.addEventListener("input", () => {
+      const v = valueInput.value;
+      if (lastJsonEntries && lastJsonEntries[i] !== undefined) {
+        lastJsonEntries[i].value = v;
+      }
+      drawBarcode(out, v, format);
+    });
+    row.append(lab, valueWrap, out);
     jsonBarcodeMount.appendChild(row);
   }
   updateJsonExportSelect();

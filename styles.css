@@ -316,6 +316,44 @@ p {
   box-shadow: inset 0 1px 0 hsl(var(--label-hue) 40% 40% / 0.12);
 }
 
+.json-barcode-value {
+  margin-bottom: 10px;
+}
+
+.json-barcode-value-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.json-barcode-value-text {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #e2e8f0;
+  word-break: break-word;
+  padding: 8px 10px;
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 8px;
+}
+
+.json-barcode-value-text:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6;
+}
+
 .json-barcode-output {
   min-height: 80px;
   width: 100%;
