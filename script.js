@@ -557,6 +557,38 @@ function drawPdfContinuationHeader(doc, margin, pageW, shipmentNumber) {
   return y;
 }
 
+const ROW_CODE_TYPE_VALUES = new Set([
+  "",
+  "CODE128",
+  "CODE39",
+  "EAN13",
+  "EAN8",
+  "UPC",
+  "ITF14",
+  "QR"
+]);
+
+function normalizeEntryRowCodeType(entry) {
+  if (ROW_CODE_TYPE_VALUES.has(entry?.rowCodeType)) return;
+  const m = entry?.mode;
+  if (m === "QR") entry.rowCodeType = "QR";
+  else if (m === "EAN13") entry.rowCodeType = "EAN13";
+  else if (m === "UPC") entry.rowCodeType = "UPC";
+  else entry.rowCodeType = "";
+}
+
+function entryRenderFormat(entry) {
+  normalizeEntryRowCodeType(entry);
+  const override = entry.rowCodeType;
+  if (override && override !== "") return override;
+  return codeTypeSelect.value;
+}
+
+function symbologyLabelForFormat(format) {
+  const opt = [...codeTypeSelect.options].find((o) => o.value === format);
+  return opt?.text?.trim() || format;
+}
+
 async function downloadLastJsonBarcodesPdf() {
   if (!lastJsonEntries?.length) {
     showJsonError("Generate barcodes first, then export PDF.");
@@ -568,9 +600,10 @@ async function downloadLastJsonBarcodesPdf() {
     return;
   }
   const { jsPDF } = mod;
-  const format = codeTypeSelect.value;
   const symLabel =
-    codeTypeSelect.options[codeTypeSelect.selectedIndex]?.text?.trim() || format;
+    codeTypeSelect.options[codeTypeSelect.selectedIndex]?.text?.trim() || codeTypeSelect.value;
+  const rowFormats = lastJsonEntries.map((e) => entryRenderFormat(e));
+  const hasMixedRowFormats = new Set(rowFormats).size > 1;
 
   let shipmentNumber = "—";
   const paste = jsonPaste.value.trim();
@@ -588,12 +621,15 @@ async function downloadLastJsonBarcodesPdf() {
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 16;
   const contentW = pageW - 2 * margin;
+  const exportSymbologyLabel = hasMixedRowFormats
+    ? `${symLabel} — mixed per barcode`
+    : symLabel;
   let y = drawPdfCoverHeader(
     doc,
     pageW,
     margin,
     shipmentNumber,
-    symLabel,
+    exportSymbologyLabel,
     lastJsonEntries.length
   );
 
@@ -603,12 +639,13 @@ async function downloadLastJsonBarcodesPdf() {
   try {
     for (let i = 0; i < lastJsonEntries.length; i += 1) {
       const { label, value } = lastJsonEntries[i];
+      const rowFormat = entryRenderFormat(lastJsonEntries[i]);
       sink.innerHTML = "";
       const out = document.createElement("div");
       out.style.cssText =
         "display:flex;align-items:center;justify-content:center;min-height:88px;padding:12px;background:#fff;width:380px;box-sizing:border-box;";
       sink.appendChild(out);
-      drawBarcode(out, value, format);
+      drawBarcode(out, value, rowFormat);
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
       const dataUrl = await rasterizeBarcodeOutput(out);
@@ -640,6 +677,10 @@ async function downloadLastJsonBarcodesPdf() {
       doc.setFontSize(9);
       doc.setTextColor(30, 41, 59);
       doc.text(titleLines, margin, y + 4.5);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Type: ${symbologyLabelForFormat(rowFormat)}`, margin, y + 8.3);
 
       y += titleH;
       doc.addImage(dataUrl, "PNG", margin, y, imgW, imgH);
@@ -722,10 +763,10 @@ function downloadLastJsonBarcodesCsv() {
 
 function renderJsonBarcodeGrid(entries) {
   jsonBarcodeMount.innerHTML = "";
-  const format = codeTypeSelect.value;
   let prevBlock = null;
   for (let i = 0; i < entries.length; i += 1) {
     const { label, value } = entries[i];
+    normalizeEntryRowCodeType(entries[i]);
     const blockKey = jsonBarcodeBlockKey(label);
     if (prevBlock !== null && shouldInsertBarcodeItemGap(prevBlock, blockKey)) {
       const gapRow = document.createElement("div");
@@ -746,6 +787,29 @@ function renderJsonBarcodeGrid(entries) {
     lab.textContent = label;
     const valueWrap = document.createElement("div");
     valueWrap.className = "json-barcode-value";
+    const typeRow = document.createElement("div");
+    typeRow.className = "json-barcode-type-row";
+    const typeLbl = document.createElement("label");
+    typeLbl.className = "json-barcode-type-label";
+    typeLbl.htmlFor = `json-barcode-type-${i}`;
+    typeLbl.textContent = "Code type";
+    const typeSelect = document.createElement("select");
+    typeSelect.id = `json-barcode-type-${i}`;
+    typeSelect.className = "json-barcode-type-select";
+    typeSelect.setAttribute("aria-label", "Barcode symbology for this row");
+    const followOpt = document.createElement("option");
+    followOpt.value = "";
+    followOpt.textContent = "Select Barcode Type";
+    typeSelect.appendChild(followOpt);
+    for (let oi = 0; oi < codeTypeSelect.options.length; oi += 1) {
+      const src = codeTypeSelect.options[oi];
+      const opt = document.createElement("option");
+      opt.value = src.value;
+      opt.textContent = src.textContent;
+      typeSelect.appendChild(opt);
+    }
+    typeSelect.value = entries[i].rowCodeType || "";
+    typeRow.append(typeLbl, typeSelect);
     const valueLbl = document.createElement("label");
     valueLbl.className = "json-barcode-value-label";
     valueLbl.htmlFor = `json-barcode-value-${i}`;
@@ -757,16 +821,23 @@ function renderJsonBarcodeGrid(entries) {
     valueInput.rows = Math.min(6, Math.max(2, String(value ?? "").split("\n").length));
     valueInput.spellcheck = false;
     valueInput.setAttribute("aria-label", "Encoded value; edit to update barcode");
-    valueWrap.append(valueLbl, valueInput);
+    valueWrap.append(typeRow, valueLbl, valueInput);
     const out = document.createElement("div");
     out.className = "json-barcode-output";
-    drawBarcode(out, value, format);
+    drawBarcode(out, value, entryRenderFormat(entries[i]));
+
+    typeSelect.addEventListener("change", () => {
+      const v = typeSelect.value;
+      entries[i].rowCodeType = ROW_CODE_TYPE_VALUES.has(v) ? v : "";
+      drawBarcode(out, valueInput.value, entryRenderFormat(entries[i]));
+    });
+
     valueInput.addEventListener("input", () => {
       const v = valueInput.value;
       if (lastJsonEntries && lastJsonEntries[i] !== undefined) {
         lastJsonEntries[i].value = v;
       }
-      drawBarcode(out, v, format);
+      drawBarcode(out, v, entryRenderFormat(entries[i]));
     });
     row.append(lab, valueWrap, out);
     jsonBarcodeMount.appendChild(row);
