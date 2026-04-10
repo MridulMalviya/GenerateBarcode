@@ -6,6 +6,7 @@ const jsonPaste = document.getElementById("jsonPaste");
 const jsonFile = document.getElementById("jsonFile");
 const jsonGenerateBtn = document.getElementById("jsonGenerateBtn");
 const jsonClearBtn = document.getElementById("jsonClearBtn");
+const jsonExportSelect = document.getElementById("jsonExportSelect");
 const jsonError = document.getElementById("jsonError");
 const jsonBarcodeMount = document.getElementById("jsonBarcodeMount");
 const savedJsonSelect = document.getElementById("savedJsonSelect");
@@ -46,6 +47,7 @@ function drawBarcode(outputEl, value, format) {
       height: 50,
       displayValue: true,
       fontSize: 11,
+      fontOptions: "bold",
       margin: 2
     });
   } catch {
@@ -239,6 +241,12 @@ function collectNsapBarcodeRows(payload) {
       it.EquipmentNumber,
       it.FormulaCode
     );
+    pushSlashComposite(
+      rows,
+      `${prefix} — EquipmentNumber/YSLDPackageCode`,
+      it.EquipmentNumber,
+      it.YSLDPackageCode
+    );
   }
 
   deliveries.forEach((del, index) => {
@@ -325,14 +333,411 @@ function clearJsonError() {
   jsonError.textContent = "";
 }
 
+/** Field kind for color grouping: text after last " — ", else last path segment, else whole label. */
+function jsonBarcodeGroupKey(label) {
+  const s = String(label || "").trim();
+  if (!s) return "unknown";
+  const sep = " — ";
+  const idx = s.lastIndexOf(sep);
+  if (idx >= 0) {
+    const tail = s.slice(idx + sep.length).trim();
+    return tail || s;
+  }
+  const dot = s.lastIndexOf(".");
+  if (dot >= 0) {
+    const leaf = s.slice(dot + 1).trim();
+    if (leaf) return leaf;
+  }
+  return s;
+}
+
+/** Fixed hues for NSAP / known field kinds so each type stays visually distinct (no accidental hash collisions). */
+const BARCODE_GROUP_HUES = {
+  ShipmentNumber: 205,
+  DeliveryNumber: 230,
+  CompartmentBottomSeal: 278,
+  CompartmentEVDSeal: 302,
+  CompartmentBatch: 325,
+  StorageUnitNumber: 38,
+  GTIN: 152,
+  EANNumber: 172,
+  YSLDPackageCode: 192,
+  ProductNumber: 58,
+  "EquipmentNumber/ProductNumber": 14,
+  "EquipmentNumber/EANNumber": 108,
+  "EquipmentNumber/GTIN": 128,
+  "EquipmentNumber/FormulaCode": 2,
+  "EquipmentNumber/YSLDPackageCode": 340
+};
+
+/**
+ * Block key for row spacing: shipment, delivery header rows, or one line per ShipmentDeliveryItemId / LineNumber.
+ */
+function jsonBarcodeBlockKey(label) {
+  const s = String(label || "").trim();
+  if (!s) return "|empty";
+  if (!s.includes(" — ")) return "^shipment";
+  const parts = s.split(" — ");
+  const d = parts[0].trim();
+  if (parts.length === 2) return `${d}|D`;
+  const mid = parts[1].trim();
+  const im = mid.match(/^ShipmentDeliveryItemId\s+(\S+)/);
+  if (im) return `${d}|I|${im[1]}`;
+  const lm = mid.match(/^LineNumber\s+(\S+)/);
+  if (lm) return `${d}|L|${lm[1]}`;
+  if (mid.startsWith("ShipmentDeliveryItemId (unspecified)")) return `${d}|I|?`;
+  return `${d}|M|${mid.slice(0, 48)}`;
+}
+
+/** Gap between rows only when leaving one item (or delivery/stop) block for another; not between D → first item. */
+function shouldInsertBarcodeItemGap(prevBlock, currBlock) {
+  if (prevBlock === null || prevBlock === currBlock) return false;
+  if (prevBlock === "^shipment") return false;
+  if (prevBlock.endsWith("|D")) {
+    const prefix = prevBlock.slice(0, -2);
+    if (currBlock.startsWith(`${prefix}|I|`) || currBlock.startsWith(`${prefix}|L|`)) return false;
+  }
+  return true;
+}
+
+function hueForBarcodeGroup(key) {
+  if (Object.prototype.hasOwnProperty.call(BARCODE_GROUP_HUES, key)) {
+    return BARCODE_GROUP_HUES[key];
+  }
+  let h = 5381;
+  for (let i = 0; i < key.length; i += 1) {
+    h = (h * 33) ^ key.charCodeAt(i);
+  }
+  return Math.abs(h) % 360;
+}
+
+function updateJsonExportSelect() {
+  const hasBarcodes = Boolean(lastJsonEntries && lastJsonEntries.length > 0);
+  const hasJsonText = Boolean(jsonPaste.value.trim());
+  jsonExportSelect.disabled = !hasBarcodes && !hasJsonText;
+}
+
+/** Off-screen host for PDF rasterization (same symbology as on-screen). */
+let pdfBarcodeRenderSink = null;
+function getPdfBarcodeRenderSink() {
+  if (!pdfBarcodeRenderSink) {
+    pdfBarcodeRenderSink = document.createElement("div");
+    pdfBarcodeRenderSink.setAttribute("aria-hidden", "true");
+    pdfBarcodeRenderSink.style.cssText =
+      "position:fixed;left:-20000px;top:0;width:400px;visibility:hidden;pointer-events:none;";
+    document.body.appendChild(pdfBarcodeRenderSink);
+  }
+  return pdfBarcodeRenderSink;
+}
+
+async function svgElementToPngDataUrl(svgEl) {
+  const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+  let w = parseFloat(svgEl.getAttribute("width")) || (vb ? vb.width : 0);
+  let h = parseFloat(svgEl.getAttribute("height")) || (vb ? vb.height : 0);
+  if (!w || !h) {
+    w = 320;
+    h = 100;
+  }
+  const scale = 2;
+  const cw = Math.ceil(w * scale);
+  const ch = Math.ceil(h * scale);
+  const svgClone = /** @type {SVGElement} */ (svgEl.cloneNode(true));
+  svgClone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  svgClone.setAttribute("width", String(cw));
+  svgClone.setAttribute("height", String(ch));
+  const svgString = new XMLSerializer().serializeToString(svgClone);
+  const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(img, 0, 0, cw, ch);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("SVG rasterize failed"));
+    };
+    img.src = url;
+  });
+}
+
+function upscaleCanvasToDataUrl(source, maxSidePx = 360) {
+  const s = Math.max(source.width, source.height);
+  const scale = Math.min(4, Math.max(1, maxSidePx / s));
+  const w = Math.ceil(source.width * scale);
+  const h = Math.ceil(source.height * scale);
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(source, 0, 0, w, h);
+  return c.toDataURL("image/png");
+}
+
+async function rasterizeBarcodeOutput(outputEl) {
+  const svg = outputEl.querySelector("svg");
+  if (svg) return svgElementToPngDataUrl(svg);
+  const canvas = outputEl.querySelector("canvas");
+  if (canvas) return upscaleCanvasToDataUrl(canvas);
+  const img = outputEl.querySelector("img");
+  if (img && img.complete && (img.naturalWidth || img.width)) {
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth || img.width;
+    c.height = img.naturalHeight || img.height;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0);
+    return c.toDataURL("image/png");
+  }
+  return null;
+}
+
+function drawPdfCoverHeader(doc, pageW, margin, shipmentNumber, symbologyLabel, barcodeCount) {
+  let y = margin;
+  doc.setFillColor(30, 64, 175);
+  doc.rect(0, 0, pageW, 4.5, "F");
+  y = 14;
+  doc.setTextColor(45, 55, 72);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.text("Shipment barcode report", margin, y);
+  y += 10;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text("Shipment number", margin, y);
+  y += 5.5;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.text(String(shipmentNumber || "—"), margin, y);
+  y += 9;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Symbology: ${symbologyLabel}`, margin, y);
+  y += 4.5;
+  doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
+  y += 4.5;
+  doc.text(`Barcodes in this export: ${barcodeCount}`, margin, y);
+  y += 8;
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.35);
+  doc.line(margin, y, pageW - margin, y);
+  y += 9;
+  return y;
+}
+
+function drawPdfContinuationHeader(doc, margin, pageW, shipmentNumber) {
+  let y = margin + 4;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Shipment number: ${String(shipmentNumber || "—")}`, margin, y);
+  y += 6;
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.25);
+  doc.line(margin, y, pageW - margin, y);
+  y += 7;
+  return y;
+}
+
+async function downloadLastJsonBarcodesPdf() {
+  if (!lastJsonEntries?.length) {
+    showJsonError("Generate barcodes first, then export PDF.");
+    return;
+  }
+  const mod = window.jspdf;
+  if (!mod?.jsPDF) {
+    showJsonError("PDF library not loaded. Refresh the page.");
+    return;
+  }
+  const { jsPDF } = mod;
+  const format = codeTypeSelect.value;
+  const symLabel =
+    codeTypeSelect.options[codeTypeSelect.selectedIndex]?.text?.trim() || format;
+
+  let shipmentNumber = "—";
+  const paste = jsonPaste.value.trim();
+  if (paste) {
+    try {
+      const sn = getShipmentNumberFromParsed(JSON.parse(paste));
+      if (sn) shipmentNumber = sn;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 16;
+  const contentW = pageW - 2 * margin;
+  let y = drawPdfCoverHeader(
+    doc,
+    pageW,
+    margin,
+    shipmentNumber,
+    symLabel,
+    lastJsonEntries.length
+  );
+
+  const sink = getPdfBarcodeRenderSink();
+  jsonExportSelect.disabled = true;
+
+  try {
+    for (let i = 0; i < lastJsonEntries.length; i += 1) {
+      const { label, value } = lastJsonEntries[i];
+      sink.innerHTML = "";
+      const out = document.createElement("div");
+      out.style.cssText =
+        "display:flex;align-items:center;justify-content:center;min-height:88px;padding:12px;background:#fff;width:380px;box-sizing:border-box;";
+      sink.appendChild(out);
+      drawBarcode(out, value, format);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const dataUrl = await rasterizeBarcodeOutput(out);
+      if (!dataUrl) continue;
+
+      const props = doc.getImageProperties(dataUrl);
+      const maxImgW = contentW;
+      let imgW = Math.min(maxImgW, 100);
+      let imgH = (props.height * imgW) / props.width;
+      const titleLines = doc.splitTextToSize(label, contentW - 24);
+      const lineMm = 4.1;
+      const titleH = titleLines.length * lineMm + 4;
+      const gapAfter = 9;
+      const sectionH = titleH + imgH + gapAfter;
+
+      if (y + sectionH > pageH - margin) {
+        doc.addPage();
+        y = drawPdfContinuationHeader(doc, margin, pageW, shipmentNumber);
+      }
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`${i + 1} / ${lastJsonEntries.length}`, pageW - margin, y + 3.2, {
+        align: "right"
+      });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(30, 41, 59);
+      doc.text(titleLines, margin, y + 4.5);
+
+      y += titleH;
+      doc.addImage(dataUrl, "PNG", margin, y, imgW, imgH);
+      y += imgH + gapAfter;
+    }
+
+    sink.innerHTML = "";
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const base = suggestedBarcodeExportBasename();
+    doc.save(`${base}-${stamp}.pdf`);
+  } catch (e) {
+    console.error(e);
+    showJsonError("Could not build PDF. Try a different code type or refresh the page.");
+  } finally {
+    sink.innerHTML = "";
+    updateJsonExportSelect();
+  }
+}
+
+function csvEscapeCell(s) {
+  return `"${String(s ?? "").replace(/"/g, '""')}"`;
+}
+
+function suggestedBarcodeExportBasename() {
+  const text = jsonPaste.value.trim();
+  if (!text) return "barcode-export";
+  try {
+    const sn = getShipmentNumberFromParsed(JSON.parse(text));
+    if (sn) return `barcodes-${String(sn).replace(/[^\w.-]+/g, "_")}`;
+  } catch {
+    /* ignore */
+  }
+  return "barcode-export";
+}
+
+function downloadCurrentJsonFile() {
+  const text = jsonPaste.value.trim();
+  if (!text) {
+    showJsonError("Paste JSON in the editor first.");
+    return;
+  }
+  let body = text;
+  try {
+    body = `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
+  } catch {
+    /* keep raw editor text */
+  }
+  const blob = new Blob([body], { type: "application/json;charset=utf-8" });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const base = suggestedBarcodeExportBasename();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${base}-${stamp}.json`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+function downloadLastJsonBarcodesCsv() {
+  if (!lastJsonEntries || !lastJsonEntries.length) {
+    showJsonError("Generate barcodes first, then export CSV.");
+    return;
+  }
+  const rows = [["Label", "Encoded value"], ...lastJsonEntries.map(({ label, value }) => [label, value])];
+  const csv = rows.map((cols) => cols.map(csvEscapeCell).join(",")).join("\r\n");
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const base = suggestedBarcodeExportBasename();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${base}-${stamp}.csv`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
 function renderJsonBarcodeGrid(entries) {
   jsonBarcodeMount.innerHTML = "";
   const format = codeTypeSelect.value;
+  let prevBlock = null;
   for (const { label, value } of entries) {
+    const blockKey = jsonBarcodeBlockKey(label);
+    if (prevBlock !== null && shouldInsertBarcodeItemGap(prevBlock, blockKey)) {
+      const gapRow = document.createElement("div");
+      gapRow.className = "json-barcode-gap-row";
+      gapRow.setAttribute("aria-hidden", "true");
+      jsonBarcodeMount.appendChild(gapRow);
+    }
+    prevBlock = blockKey;
+
     const row = document.createElement("div");
     row.className = "json-barcode-row";
     const lab = document.createElement("div");
     lab.className = "json-barcode-label";
+    const groupKey = jsonBarcodeGroupKey(label);
+    lab.dataset.bcGroup = groupKey;
+    lab.style.setProperty("--label-hue", String(hueForBarcodeGroup(groupKey)));
     lab.textContent = label;
     const out = document.createElement("div");
     out.className = "json-barcode-output";
@@ -340,12 +745,14 @@ function renderJsonBarcodeGrid(entries) {
     row.append(lab, out);
     jsonBarcodeMount.appendChild(row);
   }
+  updateJsonExportSelect();
 }
 
 function runJsonGenerate() {
   clearJsonError();
   jsonBarcodeMount.innerHTML = "";
   lastJsonEntries = null;
+  updateJsonExportSelect();
 
   let text = jsonPaste.value.trim();
   if (!text && jsonFile.files && jsonFile.files[0]) {
@@ -359,11 +766,13 @@ function runJsonGenerate() {
         lastJsonEntries = extractBarcodeRowsFromJson(data);
         if (!lastJsonEntries.length) {
           showJsonError("No string values found to encode.");
+          updateJsonExportSelect();
           return;
         }
         renderJsonBarcodeGrid(lastJsonEntries);
       } catch {
         showJsonError("Invalid JSON in file.");
+        updateJsonExportSelect();
       }
     };
     reader.onerror = () => showJsonError("Could not read file.");
@@ -387,6 +796,7 @@ function runJsonGenerate() {
   lastJsonEntries = extractBarcodeRowsFromJson(data);
   if (!lastJsonEntries.length) {
     showJsonError("No string values found to encode.");
+    updateJsonExportSelect();
     return;
   }
   renderJsonBarcodeGrid(lastJsonEntries);
@@ -432,6 +842,21 @@ jsonClearBtn.addEventListener("click", () => {
   clearJsonError();
   jsonBarcodeMount.innerHTML = "";
   lastJsonEntries = null;
+  updateJsonExportSelect();
+});
+
+jsonExportSelect.addEventListener("change", () => {
+  const v = jsonExportSelect.value;
+  if (!v) return;
+  clearJsonError();
+  if (v === "csv") downloadLastJsonBarcodesCsv();
+  else if (v === "pdf") void downloadLastJsonBarcodesPdf();
+  else if (v === "json") downloadCurrentJsonFile();
+  jsonExportSelect.value = "";
+});
+
+jsonPaste.addEventListener("input", () => {
+  updateJsonExportSelect();
 });
 
 jsonSaveBtn.addEventListener("click", () => {
@@ -521,5 +946,6 @@ codeTypeSelect.addEventListener("change", () => {
 });
 
 refreshSavedJsonSelect();
+updateJsonExportSelect();
 
 for (let i = 0; i < 6; i += 1) addInputCard();

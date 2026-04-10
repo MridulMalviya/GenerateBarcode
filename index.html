@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -52,7 +53,7 @@
           seals, batch (hidden when <code>ContainerType</code> is <code>BULK</code>), storage, <code>GTIN</code>, <code>EANNumber</code>, <code>YSLDPackageCode</code>,
           <code>ProductNumber</code>, and slash composites
           <code>EquipmentNumber/ProductNumber</code>, <code>…/EANNumber</code>, <code>…/GTIN</code>,
-          <code>…/FormulaCode</code> (both sides non-empty). Any other JSON is scanned for primitives (depth limit).
+          <code>…/FormulaCode</code>, <code>…/YSLDPackageCode</code> (both sides non-empty). Any other JSON is scanned for primitives (depth limit).
         </p>
         <label for="jsonPaste" class="paste-label">Paste JSON</label>
         <textarea
@@ -93,6 +94,15 @@
         </div>
         <div class="inline-actions">
           <button type="button" id="jsonGenerateBtn" class="btn">Generate barcodes</button>
+          <div class="json-export-wrap">
+            <label for="jsonExportSelect" class="json-export-label">Download</label>
+            <select id="jsonExportSelect" class="json-export-select" disabled>
+              <option value="">Download as…</option>
+              <option value="csv">CSV — barcode list</option>
+              <option value="pdf">PDF — barcode images</option>
+              <option value="json">JSON — editor contents</option>
+            </select>
+          </div>
           <button type="button" id="jsonClearBtn" class="btn ghost">Clear results</button>
         </div>
         <div id="jsonError" class="parse-error" hidden></div>

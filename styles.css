@@ -187,16 +187,40 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  align-items: center;
+  align-items: flex-end;
   margin-bottom: 12px;
+}
+
+.json-export-wrap {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.json-export-label {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.json-export-select {
+  min-width: 200px;
+  max-width: min(100vw - 48px, 280px);
 }
 
 .json-barcode-mount {
   margin-top: 16px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
+  column-gap: 14px;
+  row-gap: 14px;
   align-items: start;
+}
+
+.json-barcode-gap-row {
+  grid-column: 1 / -1;
+  min-height: 18px;
+  height: 18px;
+  pointer-events: none;
 }
 
 .json-barcode-row {
@@ -208,13 +232,19 @@ p {
 }
 
 .json-barcode-label {
+  --label-hue: 210;
   font-size: 0.72rem;
-  font-weight: 600;
-  color: #94a3b8;
+  font-weight: 700;
+  color: #e8eef6;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin-bottom: 8px;
-  line-height: 1.3;
+  line-height: 1.35;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: hsl(var(--label-hue) 36% 22% / 0.72);
+  border-left: 3px solid hsl(var(--label-hue) 50% 52% / 0.95);
+  box-shadow: inset 0 1px 0 hsl(var(--label-hue) 40% 40% / 0.12);
 }
 
 .json-barcode-output {
