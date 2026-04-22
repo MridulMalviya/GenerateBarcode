@@ -25,10 +25,10 @@
     </header>
 
     <main class="grid">
-      <section class="card">
-        <h2>Generator Panel</h2>
+      <section class="card wide">
+        <h2>JSON → Barcodes</h2>
         <div class="controls">
-          <label for="codeType">Code type</label>
+          <label for="codeType">Default code type</label>
           <select id="codeType">
             <option value="CODE128">Code 128</option>
             <option value="CODE39">Code 39</option>
@@ -39,13 +39,6 @@
             <option value="QR">QR Code</option>
           </select>
         </div>
-
-        <div id="inputContainer" class="input-stack"></div>
-        <button id="addCardBtn" class="btn ghost">+ Add Card</button>
-      </section>
-
-      <section class="card wide">
-        <h2>JSON → Barcodes</h2>
         <p class="section-hint">
           Paste JSON or choose a file, then <strong>Generate barcodes</strong>. NSAP payloads
           use <code>ShipmentNumber</code> once, then <code>DeliveryNumber</code> per delivery, then per
@@ -141,20 +134,6 @@
     <footer class="footer">
       <p>Built for Ecolab delivery operations</p>
     </footer>
-
-    <template id="inputCardTemplate">
-      <article class="input-card">
-        <div class="card-header">
-          <span class="label">Input</span>
-          <div class="mode-toggle">
-            <button class="mode-btn active" data-mode="BC">BC</button>
-            <button class="mode-btn" data-mode="QR">QR</button>
-          </div>
-        </div>
-        <input class="code-input" placeholder="Enter value..." />
-        <div class="output"></div>
-      </article>
-    </template>
 
     <script src="./script.js"></script>
   </body>

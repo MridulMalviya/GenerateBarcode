@@ -1,6 +1,3 @@
-const inputContainer = document.getElementById("inputContainer");
-const inputTemplate = document.getElementById("inputCardTemplate");
-const addCardBtn = document.getElementById("addCardBtn");
 const codeTypeSelect = document.getElementById("codeType");
 const jsonPaste = document.getElementById("jsonPaste");
 const jsonFile = document.getElementById("jsonFile");
@@ -899,40 +896,6 @@ function runJsonGenerate() {
   renderJsonBarcodeGrid(lastJsonEntries);
 }
 
-function addInputCard() {
-  const node = inputTemplate.content.cloneNode(true);
-  const card = node.querySelector(".input-card");
-  const input = node.querySelector(".code-input");
-  const output = node.querySelector(".output");
-  const modeButtons = [...node.querySelectorAll(".mode-btn")];
-
-  let mode = "BC";
-
-  function renderOutput() {
-    const value = input.value.trim();
-    output.innerHTML = "";
-    if (!value) return;
-    const format =
-      mode === "QR" || codeTypeSelect.value === "QR" ? "QR" : codeTypeSelect.value;
-    drawBarcode(output, value, format);
-  }
-
-  modeButtons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      modeButtons.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      mode = btn.dataset.mode;
-      renderOutput();
-    });
-  });
-
-  input.addEventListener("input", renderOutput);
-
-  inputContainer.appendChild(card);
-}
-
-addCardBtn.addEventListener("click", addInputCard);
-
 jsonGenerateBtn.addEventListener("click", runJsonGenerate);
 
 jsonClearBtn.addEventListener("click", () => {
@@ -1070,9 +1033,6 @@ jsonDeleteSavedBtn.addEventListener("click", () => {
 });
 
 codeTypeSelect.addEventListener("change", () => {
-  document.querySelectorAll(".input-card .code-input").forEach((inp) => {
-    inp.dispatchEvent(new Event("input"));
-  });
   if (lastJsonEntries && lastJsonEntries.length) {
     renderJsonBarcodeGrid(lastJsonEntries);
   }
@@ -1080,5 +1040,3 @@ codeTypeSelect.addEventListener("change", () => {
 
 refreshSavedJsonSelect();
 updateJsonExportSelect();
-
-for (let i = 0; i < 6; i += 1) addInputCard();
