@@ -323,6 +323,20 @@ function extractBarcodeRowsFromJson(data) {
   return collectGenericJsonRows(data);
 }
 
+function collectPlainTextRows(text) {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+  return dedupeRows(
+    lines.map((value, index) => ({
+      label: lines.length === 1 ? "Input value" : `Input value ${index + 1}`,
+      value
+    }))
+  );
+}
+
 function showJsonError(msg) {
   jsonError.hidden = false;
   jsonError.textContent = msg;
@@ -883,7 +897,13 @@ function runJsonGenerate() {
   try {
     data = JSON.parse(text);
   } catch {
-    showJsonError("Invalid JSON.");
+    // Fallback for direct/manual values now that the old generator panel is removed.
+    lastJsonEntries = collectPlainTextRows(text);
+    if (!lastJsonEntries.length) {
+      showJsonError("Paste JSON, choose a file, or enter a plain value.");
+      return;
+    }
+    renderJsonBarcodeGrid(lastJsonEntries);
     return;
   }
 
