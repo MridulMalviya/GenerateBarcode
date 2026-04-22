@@ -207,6 +207,7 @@ function collectNsapBarcodeRows(payload) {
 
   function pushNsapLineFields(deliveryPrefix, it) {
     const prefix = `${deliveryPrefix} — ${nsapItemClassPrefix(it)}`;
+    pushField(rows, `${prefix} — CompartmentNumber`, it.CompartmentNumber);
     pushField(rows, `${prefix} — CompartmentBottomSeal`, it.CompartmentBottomSeal);
     pushField(rows, `${prefix} — CompartmentEVDSeal`, it.CompartmentEVDSeal);
     if (showCompartmentBatchForContainerType(it)) {
