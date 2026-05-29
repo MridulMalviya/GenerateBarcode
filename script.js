@@ -417,6 +417,112 @@ function shouldInsertBarcodeItemGap(prevBlock, currBlock) {
   return true;
 }
 
+/** Layout band: shipment row, or one row per delivery prefix (header + line items). */
+function jsonBarcodeLayoutBandKey(label) {
+  const s = String(label || "").trim();
+  if (!s) return "|empty";
+  if (!s.includes(" — ")) return "^shipment";
+  return s.split(" — ")[0].trim();
+}
+
+function groupEntriesIntoLayoutBands(entries) {
+  const bands = [];
+  const bandIndex = new Map();
+  for (let i = 0; i < entries.length; i += 1) {
+    const key = jsonBarcodeLayoutBandKey(entries[i].label);
+    let idx = bandIndex.get(key);
+    if (idx === undefined) {
+      idx = bands.length;
+      bandIndex.set(key, idx);
+      bands.push({
+        key,
+        type: key === "^shipment" ? "shipment" : "delivery",
+        items: []
+      });
+    }
+    bands[idx].items.push(i);
+  }
+  return bands;
+}
+
+function appendJsonBarcodeGapRow(parent) {
+  const gapRow = document.createElement("div");
+  gapRow.className = "json-barcode-gap-row";
+  gapRow.setAttribute("aria-hidden", "true");
+  parent.appendChild(gapRow);
+}
+
+function appendJsonBarcodeCard(parent, entries, i) {
+  const { label, value } = entries[i];
+  normalizeEntryRowCodeType(entries[i]);
+
+  const row = document.createElement("div");
+  row.className = "json-barcode-row";
+  row.dataset.entryIndex = String(i);
+  const lab = document.createElement("div");
+  lab.className = "json-barcode-label";
+  const groupKey = jsonBarcodeGroupKey(label);
+  lab.dataset.bcGroup = groupKey;
+  lab.style.setProperty("--label-hue", String(hueForBarcodeGroup(groupKey)));
+  lab.textContent = label;
+  const valueWrap = document.createElement("div");
+  valueWrap.className = "json-barcode-value";
+  const typeRow = document.createElement("div");
+  typeRow.className = "json-barcode-type-row";
+  const typeLbl = document.createElement("label");
+  typeLbl.className = "json-barcode-type-label";
+  typeLbl.htmlFor = `json-barcode-type-${i}`;
+  typeLbl.textContent = "Code type";
+  const typeSelect = document.createElement("select");
+  typeSelect.id = `json-barcode-type-${i}`;
+  typeSelect.className = "json-barcode-type-select";
+  typeSelect.setAttribute("aria-label", "Barcode symbology for this row");
+  const followOpt = document.createElement("option");
+  followOpt.value = "";
+  followOpt.textContent = "Select Barcode Type";
+  typeSelect.appendChild(followOpt);
+  for (let oi = 0; oi < codeTypeSelect.options.length; oi += 1) {
+    const src = codeTypeSelect.options[oi];
+    const opt = document.createElement("option");
+    opt.value = src.value;
+    opt.textContent = src.textContent;
+    typeSelect.appendChild(opt);
+  }
+  typeSelect.value = entries[i].rowCodeType || "";
+  typeRow.append(typeLbl, typeSelect);
+  const valueLbl = document.createElement("label");
+  valueLbl.className = "json-barcode-value-label";
+  valueLbl.htmlFor = `json-barcode-value-${i}`;
+  valueLbl.textContent = "Encoded value (editable)";
+  const valueInput = document.createElement("textarea");
+  valueInput.id = `json-barcode-value-${i}`;
+  valueInput.className = "json-barcode-value-text";
+  valueInput.value = String(value ?? "");
+  valueInput.rows = Math.min(6, Math.max(2, String(value ?? "").split("\n").length));
+  valueInput.spellcheck = false;
+  valueInput.setAttribute("aria-label", "Encoded value; edit to update barcode");
+  valueWrap.append(typeRow, valueLbl, valueInput);
+  const out = document.createElement("div");
+  out.className = "json-barcode-output";
+  drawBarcode(out, value, entryRenderFormat(entries[i]));
+
+  typeSelect.addEventListener("change", () => {
+    const v = typeSelect.value;
+    entries[i].rowCodeType = ROW_CODE_TYPE_VALUES.has(v) ? v : "";
+    drawBarcode(out, valueInput.value, entryRenderFormat(entries[i]));
+  });
+
+  valueInput.addEventListener("input", () => {
+    const v = valueInput.value;
+    if (lastJsonEntries && lastJsonEntries[i] !== undefined) {
+      lastJsonEntries[i].value = v;
+    }
+    drawBarcode(out, v, entryRenderFormat(entries[i]));
+  });
+  row.append(lab, valueWrap, out);
+  parent.appendChild(row);
+}
+
 function hueForBarcodeGroup(key) {
   if (Object.prototype.hasOwnProperty.call(BARCODE_GROUP_HUES, key)) {
     return BARCODE_GROUP_HUES[key];
@@ -777,84 +883,24 @@ function downloadLastJsonBarcodesCsv() {
 
 function renderJsonBarcodeGrid(entries) {
   jsonBarcodeMount.innerHTML = "";
-  let prevBlock = null;
-  for (let i = 0; i < entries.length; i += 1) {
-    const { label, value } = entries[i];
-    normalizeEntryRowCodeType(entries[i]);
-    const blockKey = jsonBarcodeBlockKey(label);
-    if (prevBlock !== null && shouldInsertBarcodeItemGap(prevBlock, blockKey)) {
-      const gapRow = document.createElement("div");
-      gapRow.className = "json-barcode-gap-row";
-      gapRow.setAttribute("aria-hidden", "true");
-      jsonBarcodeMount.appendChild(gapRow);
-    }
-    prevBlock = blockKey;
+  const bands = groupEntriesIntoLayoutBands(entries);
 
-    const row = document.createElement("div");
-    row.className = "json-barcode-row";
-    row.dataset.entryIndex = String(i);
-    const lab = document.createElement("div");
-    lab.className = "json-barcode-label";
-    const groupKey = jsonBarcodeGroupKey(label);
-    lab.dataset.bcGroup = groupKey;
-    lab.style.setProperty("--label-hue", String(hueForBarcodeGroup(groupKey)));
-    lab.textContent = label;
-    const valueWrap = document.createElement("div");
-    valueWrap.className = "json-barcode-value";
-    const typeRow = document.createElement("div");
-    typeRow.className = "json-barcode-type-row";
-    const typeLbl = document.createElement("label");
-    typeLbl.className = "json-barcode-type-label";
-    typeLbl.htmlFor = `json-barcode-type-${i}`;
-    typeLbl.textContent = "Code type";
-    const typeSelect = document.createElement("select");
-    typeSelect.id = `json-barcode-type-${i}`;
-    typeSelect.className = "json-barcode-type-select";
-    typeSelect.setAttribute("aria-label", "Barcode symbology for this row");
-    const followOpt = document.createElement("option");
-    followOpt.value = "";
-    followOpt.textContent = "Select Barcode Type";
-    typeSelect.appendChild(followOpt);
-    for (let oi = 0; oi < codeTypeSelect.options.length; oi += 1) {
-      const src = codeTypeSelect.options[oi];
-      const opt = document.createElement("option");
-      opt.value = src.value;
-      opt.textContent = src.textContent;
-      typeSelect.appendChild(opt);
-    }
-    typeSelect.value = entries[i].rowCodeType || "";
-    typeRow.append(typeLbl, typeSelect);
-    const valueLbl = document.createElement("label");
-    valueLbl.className = "json-barcode-value-label";
-    valueLbl.htmlFor = `json-barcode-value-${i}`;
-    valueLbl.textContent = "Encoded value (editable)";
-    const valueInput = document.createElement("textarea");
-    valueInput.id = `json-barcode-value-${i}`;
-    valueInput.className = "json-barcode-value-text";
-    valueInput.value = String(value ?? "");
-    valueInput.rows = Math.min(6, Math.max(2, String(value ?? "").split("\n").length));
-    valueInput.spellcheck = false;
-    valueInput.setAttribute("aria-label", "Encoded value; edit to update barcode");
-    valueWrap.append(typeRow, valueLbl, valueInput);
-    const out = document.createElement("div");
-    out.className = "json-barcode-output";
-    drawBarcode(out, value, entryRenderFormat(entries[i]));
+  for (const band of bands) {
+    const bandEl = document.createElement("div");
+    bandEl.className = `json-barcode-band json-barcode-band-${band.type}`;
+    bandEl.dataset.bandKey = band.key;
+    let prevBlock = null;
 
-    typeSelect.addEventListener("change", () => {
-      const v = typeSelect.value;
-      entries[i].rowCodeType = ROW_CODE_TYPE_VALUES.has(v) ? v : "";
-      drawBarcode(out, valueInput.value, entryRenderFormat(entries[i]));
-    });
-
-    valueInput.addEventListener("input", () => {
-      const v = valueInput.value;
-      if (lastJsonEntries && lastJsonEntries[i] !== undefined) {
-        lastJsonEntries[i].value = v;
+    for (const i of band.items) {
+      const blockKey = jsonBarcodeBlockKey(entries[i].label);
+      if (band.type === "delivery" && prevBlock !== null && shouldInsertBarcodeItemGap(prevBlock, blockKey)) {
+        appendJsonBarcodeGapRow(bandEl);
       }
-      drawBarcode(out, v, entryRenderFormat(entries[i]));
-    });
-    row.append(lab, valueWrap, out);
-    jsonBarcodeMount.appendChild(row);
+      prevBlock = blockKey;
+      appendJsonBarcodeCard(bandEl, entries, i);
+    }
+
+    jsonBarcodeMount.appendChild(bandEl);
   }
   updateJsonExportSelect();
 }
