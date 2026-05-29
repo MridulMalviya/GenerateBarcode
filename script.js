@@ -213,6 +213,7 @@ function collectNsapBarcodeRows(payload) {
     if (showCompartmentBatchForContainerType(it)) {
       pushField(rows, `${prefix} — CompartmentBatch`, it.CompartmentBatch);
     }
+    pushField(rows, `${prefix} — TransporterBatchNumber`, it.TransporterBatchNumber);
     pushField(rows, `${prefix} — StorageUnitNumber`, it.StorageUnitNumber);
     pushField(rows, `${prefix} — GTIN`, it.GTIN);
     pushField(rows, `${prefix} — EANNumber`, it.EANNumber);
@@ -373,6 +374,7 @@ const BARCODE_GROUP_HUES = {
   CompartmentBottomSeal: 278,
   CompartmentEVDSeal: 302,
   CompartmentBatch: 325,
+  TransporterBatchNumber: 48,
   StorageUnitNumber: 38,
   GTIN: 152,
   EANNumber: 172,
