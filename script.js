@@ -15,8 +15,61 @@ const jsonSaveBtn = document.getElementById("jsonSaveBtn");
 const jsonDeleteSavedBtn = document.getElementById("jsonDeleteSavedBtn");
 const saveShipmentOverride = document.getElementById("saveShipmentOverride");
 const jsonSaveStatus = document.getElementById("jsonSaveStatus");
+const apiEnv = document.getElementById("apiEnv");
+const apiShipmentNumber = document.getElementById("apiShipmentNumber");
+const apiBearerToken = document.getElementById("apiBearerToken");
+const apiFetchBtn = document.getElementById("apiFetchBtn");
+const apiClearTokenBtn = document.getElementById("apiClearTokenBtn");
+const toggleTokenBtn = document.getElementById("toggleTokenBtn");
+const apiUrlPreview = document.getElementById("apiUrlPreview");
+const apiStatus = document.getElementById("apiStatus");
+const tokenExpiryBadge = document.getElementById("tokenExpiryBadge");
+const tokenExpiryHint = document.getElementById("tokenExpiryHint");
+const resultsSummary = document.getElementById("resultsSummary");
+const resultsShipmentTitle = document.getElementById("resultsShipmentTitle");
+const resultsStats = document.getElementById("resultsStats");
+const resultsLegend = document.getElementById("resultsLegend");
 
 const SAVED_JSON_STORAGE_KEY = "ecolabSavedJsonByShipment";
+const TOKEN_SESSION_KEY = "ecolabApiBearerToken";
+const ENV_SESSION_KEY = "ecolabApiEnv";
+const SHIPMENT_SESSION_KEY = "ecolabApiShipmentNumber";
+const DEFAULT_TOKEN_HINT =
+  "Token stays in this browser session only. Never commit tokens.";
+
+/** @type {ReturnType<typeof setInterval> | null} */
+let tokenExpiryTimer = null;
+
+/** Hostnames follow the QA pattern: digitalbulkcommonapi-qa.azurewebsites.net */
+const API_ENV_HOSTS = {
+  dev: "https://digitalbulkcommonapi-dev.azurewebsites.net",
+  qa: "https://digitalbulkcommonapi-qa.azurewebsites.net",
+  qa2: "https://digitalbulkcommonapi-qa2.azurewebsites.net",
+  uat: "https://digitalbulkcommonapi-uat.azurewebsites.net",
+  stg: "https://digitalbulkcommonapi-stg.azurewebsites.net",
+  stage: "https://digitalbulkcommonapi-stg.azurewebsites.net",
+  prod: "https://digitalbulkcommonapi.azurewebsites.net"
+};
+
+const FIELD_FRIENDLY_NAMES = {
+  ShipmentNumber: "Shipment number",
+  DeliveryNumber: "Delivery number",
+  CompartmentNumber: "Compartment #",
+  CompartmentBottomSeal: "Bottom seal",
+  CompartmentEVDSeal: "EVD seal",
+  CompartmentBatch: "Compartment batch",
+  TransporterBatchNumber: "Transporter batch",
+  StorageUnitNumber: "Storage unit",
+  GTIN: "GTIN",
+  EANNumber: "EAN",
+  YSLDPackageCode: "YSLD package",
+  ProductNumber: "Product number",
+  "EquipmentNumber/ProductNumber": "Equipment / Product",
+  "EquipmentNumber/EANNumber": "Equipment / EAN",
+  "EquipmentNumber/GTIN": "Equipment / GTIN",
+  "EquipmentNumber/FormulaCode": "Equipment / Formula",
+  "EquipmentNumber/YSLDPackageCode": "Equipment / YSLD"
+};
 
 /** @type {{ label: string, value: string }[] | null} */
 let lastJsonEntries = null;
@@ -371,6 +424,7 @@ function jsonBarcodeGroupKey(label) {
 const BARCODE_GROUP_HUES = {
   ShipmentNumber: 205,
   DeliveryNumber: 230,
+  CompartmentNumber: 255,
   CompartmentBottomSeal: 278,
   CompartmentEVDSeal: 302,
   CompartmentBatch: 325,
@@ -445,6 +499,469 @@ function groupEntriesIntoLayoutBands(entries) {
   return bands;
 }
 
+function friendlyFieldName(groupKey) {
+  return FIELD_FRIENDLY_NAMES[groupKey] || groupKey;
+}
+
+function parseLabelContext(label) {
+  const s = String(label || "").trim();
+  const groupKey = jsonBarcodeGroupKey(s);
+  const parts = s.split(" — ").map((p) => p.trim()).filter(Boolean);
+  let context = "";
+  if (parts.length >= 3) {
+    context = parts.slice(0, -1).join(" · ");
+  } else if (parts.length === 2 && groupKey !== "DeliveryNumber") {
+    context = parts[0];
+  } else if (parts.length === 2 && groupKey === "DeliveryNumber") {
+    context = parts[0];
+  }
+  return {
+    groupKey,
+    title: friendlyFieldName(groupKey),
+    context,
+    raw: s
+  };
+}
+
+function buildShipmentApiUrl(env, shipmentNumber) {
+  const base = API_ENV_HOSTS[env] || API_ENV_HOSTS.qa;
+  const sn = encodeURIComponent(String(shipmentNumber || "").trim());
+  return `${base}/api/syncShipmentDetail/${sn}?getFullDetail=True`;
+}
+
+function collectApiErrorText(node, depth = 0) {
+  if (node == null || depth > 4) return "";
+  if (typeof node === "string") return node.trim();
+  if (typeof node !== "object") return "";
+  if (Array.isArray(node)) {
+    return node.map((item) => collectApiErrorText(item, depth + 1)).filter(Boolean).join("; ");
+  }
+  const keys = [
+    "message",
+    "Message",
+    "errorMessage",
+    "ErrorMessage",
+    "detail",
+    "Detail",
+    "title",
+    "Title",
+    "error",
+    "Error",
+    "exceptionMessage",
+    "ExceptionMessage",
+    "reason",
+    "Reason"
+  ];
+  for (const key of keys) {
+    const v = node[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (v && typeof v === "object") {
+      const nested = collectApiErrorText(v, depth + 1);
+      if (nested) return nested;
+    }
+  }
+  if (node.errors && typeof node.errors === "object") {
+    const parts = [];
+    for (const [field, val] of Object.entries(node.errors)) {
+      const text = collectApiErrorText(val, depth + 1);
+      if (text) parts.push(field ? `${field}: ${text}` : text);
+    }
+    if (parts.length) return parts.join("; ");
+  }
+  return "";
+}
+
+function formatHttpStatusLabel(status) {
+  const labels = {
+    400: "Bad request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not found",
+    408: "Request timeout",
+    409: "Conflict",
+    422: "Validation failed",
+    429: "Too many requests",
+    500: "Server error",
+    502: "Bad gateway",
+    503: "Service unavailable",
+    504: "Gateway timeout"
+  };
+  return labels[status] || `HTTP ${status}`;
+}
+
+function extractApiErrorMessage(status, text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    if (status === 401 || status === 403) {
+      return `${formatHttpStatusLabel(status)} (${status}): token is expired or invalid. Paste a new bearer token.`;
+    }
+    if (status === 404) {
+      return `${formatHttpStatusLabel(status)} (${status}): shipment was not found for this id.`;
+    }
+    return `${formatHttpStatusLabel(status)} (${status}): empty response from API.`;
+  }
+
+  try {
+    const errJson = JSON.parse(raw);
+    const detail = collectApiErrorText(errJson);
+    if (status === 401 || status === 403) {
+      return `${formatHttpStatusLabel(status)} (${status}): ${detail || "token is expired or invalid. Paste a new bearer token."}`;
+    }
+    if (status === 404) {
+      return `${formatHttpStatusLabel(status)} (${status}): ${detail || "shipment was not found for this id."}`;
+    }
+    if (detail) return `${formatHttpStatusLabel(status)} (${status}): ${detail}`;
+  } catch {
+    const stripped = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (stripped) {
+      return `${formatHttpStatusLabel(status)} (${status}): ${stripped.slice(0, 280)}`;
+    }
+  }
+  return `${formatHttpStatusLabel(status)} (${status}).`;
+}
+
+function payloadLooksLikeApiFailure(data) {
+  if (!data || typeof data !== "object") return "";
+  const failed =
+    data.isSuccess === false ||
+    data.IsSuccess === false ||
+    data.success === false ||
+    data.Success === false ||
+    data.status === false;
+  if (!failed) return "";
+  return collectApiErrorText(data) || "API returned a failure response.";
+}
+
+function normalizeBearerToken(raw) {
+  let t = String(raw ?? "").trim();
+  if (/^bearer\s+/i.test(t)) t = t.replace(/^bearer\s+/i, "").trim();
+  return t;
+}
+
+function decodeJwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length < 2) return null;
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+    const json = atob(b64 + pad);
+    const payload = JSON.parse(json);
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatTokenRemaining(ms) {
+  if (ms <= 0) return "0m";
+  const totalMin = Math.floor(ms / 60000);
+  if (totalMin < 60) return `${Math.max(1, totalMin)}m`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h < 48) return m ? `${h}h ${m}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  return `${d}d`;
+}
+
+/**
+ * @returns {{ state: "empty" | "unknown" | "valid" | "expiring" | "expired", expMs?: number, remainingMs?: number }}
+ */
+function getTokenExpiryState(token) {
+  const t = normalizeBearerToken(token);
+  if (!t) return { state: "empty" };
+  const payload = decodeJwtPayload(t);
+  if (!payload || typeof payload.exp !== "number") return { state: "unknown" };
+  const expMs = payload.exp * 1000;
+  const remainingMs = expMs - Date.now();
+  if (remainingMs <= 0) return { state: "expired", expMs, remainingMs };
+  if (remainingMs <= 5 * 60 * 1000) return { state: "expiring", expMs, remainingMs };
+  return { state: "valid", expMs, remainingMs };
+}
+
+function setTokenFieldExpired(isExpired) {
+  apiBearerToken?.classList.toggle("is-expired", Boolean(isExpired));
+  document.querySelector(".token-row")?.classList.toggle("is-expired", Boolean(isExpired));
+}
+
+function updateTokenExpiryUi() {
+  if (!tokenExpiryBadge) return;
+  const info = getTokenExpiryState(apiBearerToken?.value || "");
+  tokenExpiryBadge.hidden = info.state === "empty";
+  tokenExpiryBadge.className = "token-expiry-badge";
+  setTokenFieldExpired(info.state === "expired");
+
+  if (info.state === "empty") {
+    if (tokenExpiryHint) tokenExpiryHint.textContent = DEFAULT_TOKEN_HINT;
+    return;
+  }
+
+  if (info.state === "expired") {
+    tokenExpiryBadge.classList.add("is-expired");
+    tokenExpiryBadge.innerHTML =
+      `<span class="token-icon" aria-hidden="true">⚠</span>` +
+      `<span>Expired — use a new token</span>`;
+    if (tokenExpiryHint) {
+      tokenExpiryHint.textContent =
+        "This token has expired. Paste a fresh bearer token, then fetch again.";
+    }
+    return;
+  }
+
+  if (info.state === "expiring") {
+    tokenExpiryBadge.classList.add("is-expiring");
+    tokenExpiryBadge.innerHTML =
+      `<span class="token-icon" aria-hidden="true">⏱</span>` +
+      `<span>Expiring soon · ${formatTokenRemaining(info.remainingMs || 0)} left</span>`;
+    if (tokenExpiryHint) {
+      tokenExpiryHint.textContent =
+        "Token will expire soon. Prefer pasting a new one before fetching.";
+    }
+    return;
+  }
+
+  if (info.state === "valid") {
+    tokenExpiryBadge.classList.add("is-valid");
+    tokenExpiryBadge.innerHTML =
+      `<span class="token-icon" aria-hidden="true">✓</span>` +
+      `<span>Valid · ${formatTokenRemaining(info.remainingMs || 0)} left</span>`;
+    if (tokenExpiryHint) tokenExpiryHint.textContent = DEFAULT_TOKEN_HINT;
+    return;
+  }
+
+  tokenExpiryBadge.classList.add("is-unknown");
+  tokenExpiryBadge.innerHTML =
+    `<span class="token-icon" aria-hidden="true">ⓘ</span>` +
+    `<span>Token set (expiry unknown)</span>`;
+  if (tokenExpiryHint) tokenExpiryHint.textContent = DEFAULT_TOKEN_HINT;
+}
+
+function startTokenExpiryWatcher() {
+  updateTokenExpiryUi();
+  if (tokenExpiryTimer) clearInterval(tokenExpiryTimer);
+  tokenExpiryTimer = setInterval(updateTokenExpiryUi, 15000);
+}
+
+function updateApiUrlPreview() {
+  if (!apiUrlPreview) return;
+  const env = apiEnv?.value || "qa";
+  const sn = apiShipmentNumber?.value.trim() || "{shipmentId}";
+  apiUrlPreview.textContent = buildShipmentApiUrl(env, sn);
+}
+
+function showApiStatus(msg, isError) {
+  if (!apiStatus) return;
+  if (!msg) {
+    apiStatus.hidden = true;
+    apiStatus.textContent = "";
+    apiStatus.classList.remove("is-error", "is-ok");
+    return;
+  }
+  apiStatus.hidden = false;
+  apiStatus.textContent = msg;
+  apiStatus.classList.toggle("is-error", Boolean(isError));
+  apiStatus.classList.toggle("is-ok", !isError);
+}
+
+function unwrapApiShipmentPayload(raw) {
+  if (!raw || typeof raw !== "object") return raw;
+  if (raw.ShipmentDetail) return raw;
+  if (raw.data && typeof raw.data === "object") {
+    if (raw.data.ShipmentDetail) return raw.data;
+    if (raw.data.result && typeof raw.data.result === "object" && raw.data.result.ShipmentDetail) {
+      return raw.data.result;
+    }
+  }
+  if (raw.result && typeof raw.result === "object" && raw.result.ShipmentDetail) return raw.result;
+  if (raw.payload && typeof raw.payload === "object" && raw.payload.ShipmentDetail) return raw.payload;
+  if (raw.Result && typeof raw.Result === "object" && raw.Result.ShipmentDetail) return raw.Result;
+  return unwrapNsapPayload(raw) || raw;
+}
+
+async function fetchShipmentAndGenerate() {
+  clearJsonError();
+  showApiStatus("");
+  const env = apiEnv?.value || "qa";
+  const shipmentNumber = apiShipmentNumber?.value.trim() || "";
+  const token = normalizeBearerToken(apiBearerToken?.value || "");
+
+  if (!shipmentNumber) {
+    showApiStatus("Enter a shipment id.", true);
+    apiShipmentNumber?.focus();
+    return;
+  }
+  if (!token) {
+    showApiStatus("Paste a bearer token.", true);
+    apiBearerToken?.focus();
+    updateTokenExpiryUi();
+    return;
+  }
+
+  const expiry = getTokenExpiryState(token);
+  if (expiry.state === "expired") {
+    showApiStatus("Token expired — paste a new bearer token, then try again.", true);
+    updateTokenExpiryUi();
+    apiBearerToken?.focus();
+    apiBearerToken?.select?.();
+    return;
+  }
+
+  const url = buildShipmentApiUrl(env, shipmentNumber);
+  apiFetchBtn.disabled = true;
+  apiFetchBtn.textContent = "Fetching…";
+  showApiStatus(`Calling ${env.toUpperCase()}…`);
+
+  try {
+    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
+    sessionStorage.setItem(ENV_SESSION_KEY, env);
+    sessionStorage.setItem(SHIPMENT_SESSION_KEY, shipmentNumber);
+
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    const text = await res.text();
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) updateTokenExpiryUi();
+      throw new Error(extractApiErrorMessage(res.status, text));
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error("API returned a non-JSON response. Check the shipment id and environment.");
+    }
+
+    const failure = payloadLooksLikeApiFailure(data);
+    if (failure) throw new Error(failure);
+
+    const payload = unwrapApiShipmentPayload(data);
+    if (!payload || typeof payload !== "object") {
+      throw new Error("API returned an empty shipment payload.");
+    }
+    const pretty = `${JSON.stringify(payload, null, 2)}\n`;
+    jsonPaste.value = pretty;
+    hideJsonFileRemarks();
+    if (jsonFile) jsonFile.value = "";
+
+    lastJsonEntries = extractBarcodeRowsFromJson(payload);
+    if (!lastJsonEntries.length) {
+      showJsonError("Shipment loaded, but no barcode values were found.");
+      updateJsonExportSelect();
+      showApiStatus("Loaded JSON, but no encodeable fields found.", true);
+      return;
+    }
+
+    renderJsonBarcodeGrid(lastJsonEntries);
+    const sn = getShipmentNumberFromParsed(payload) || shipmentNumber;
+    showApiStatus(
+      `Loaded ${sn} from ${env.toUpperCase()} · ${lastJsonEntries.length} barcodes generated.`,
+      false
+    );
+    setActiveTab("api");
+  } catch (err) {
+    const raw = err?.message || String(err);
+    let msg = raw;
+    if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(raw)) {
+      msg =
+        `Network error calling ${env.toUpperCase()}. Check the shipment id, environment URL, and CORS. ` +
+        "If the browser blocked the request, paste JSON on the JSON tab instead.";
+    }
+    showApiStatus(msg, true);
+    showJsonError(msg);
+  } finally {
+    apiFetchBtn.disabled = false;
+    apiFetchBtn.textContent = "Fetch & generate barcodes";
+  }
+}
+
+function hideResultsSummary() {
+  if (resultsSummary) resultsSummary.hidden = true;
+  if (resultsStats) resultsStats.innerHTML = "";
+  if (resultsLegend) resultsLegend.innerHTML = "";
+}
+
+function updateResultsSummary(entries, bands) {
+  if (!resultsSummary || !resultsShipmentTitle || !resultsStats || !resultsLegend) return;
+  if (!entries?.length) {
+    hideResultsSummary();
+    return;
+  }
+
+  const shipmentEntry = entries.find((e) => jsonBarcodeGroupKey(e.label) === "ShipmentNumber");
+  const shipmentValue = shipmentEntry?.value || "Shipment barcodes";
+  resultsShipmentTitle.textContent = shipmentValue;
+
+  const deliveryCount = bands.filter((b) => b.type === "delivery").length;
+  resultsStats.innerHTML = "";
+  const stats = [
+    ["Barcodes", String(entries.length)],
+    ["Deliveries", String(deliveryCount)],
+    ["Sections", String(bands.length)]
+  ];
+  for (const [k, v] of stats) {
+    const el = document.createElement("div");
+    el.className = "stat-pill";
+    el.innerHTML = `<span class="stat-label">${k}</span><span class="stat-value">${v}</span>`;
+    resultsStats.appendChild(el);
+  }
+
+  const seen = new Set();
+  resultsLegend.innerHTML = "";
+  for (const e of entries) {
+    const key = jsonBarcodeGroupKey(e.label);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const chip = document.createElement("span");
+    chip.className = "legend-chip";
+    chip.style.setProperty("--label-hue", String(hueForBarcodeGroup(key)));
+    chip.textContent = friendlyFieldName(key);
+    resultsLegend.appendChild(chip);
+  }
+
+  resultsSummary.hidden = false;
+}
+
+function appendBandHeader(parent, band, entries) {
+  const header = document.createElement("div");
+  header.className = "band-header";
+
+  const title = document.createElement("div");
+  title.className = "band-title";
+  const count = document.createElement("span");
+  count.className = "band-count";
+  count.textContent = `${band.items.length} barcode${band.items.length === 1 ? "" : "s"}`;
+
+  if (band.type === "shipment") {
+    title.textContent = "Shipment";
+    header.classList.add("band-header-shipment");
+  } else {
+    const first = entries[band.items[0]];
+    const deliveryLabel =
+      band.key.startsWith("Unmatched")
+        ? band.key
+        : `Delivery ${band.key}`;
+    title.textContent = deliveryLabel;
+    const dnEntry = band.items
+      .map((i) => entries[i])
+      .find((e) => jsonBarcodeGroupKey(e.label) === "DeliveryNumber");
+    if (dnEntry?.value) {
+      const sub = document.createElement("span");
+      sub.className = "band-sub";
+      sub.textContent = dnEntry.value;
+      title.appendChild(document.createTextNode(" "));
+      title.appendChild(sub);
+    }
+  }
+
+  header.append(title, count);
+  parent.appendChild(header);
+}
+
 function appendJsonBarcodeGapRow(parent) {
   const gapRow = document.createElement("div");
   gapRow.className = "json-barcode-gap-row";
@@ -455,16 +972,27 @@ function appendJsonBarcodeGapRow(parent) {
 function appendJsonBarcodeCard(parent, entries, i) {
   const { label, value } = entries[i];
   normalizeEntryRowCodeType(entries[i]);
+  const meta = parseLabelContext(label);
 
   const row = document.createElement("div");
   row.className = "json-barcode-row";
   row.dataset.entryIndex = String(i);
+  row.dataset.bcGroup = meta.groupKey;
+  row.style.setProperty("--label-hue", String(hueForBarcodeGroup(meta.groupKey)));
+
   const lab = document.createElement("div");
   lab.className = "json-barcode-label";
-  const groupKey = jsonBarcodeGroupKey(label);
-  lab.dataset.bcGroup = groupKey;
-  lab.style.setProperty("--label-hue", String(hueForBarcodeGroup(groupKey)));
-  lab.textContent = label;
+  const titleEl = document.createElement("div");
+  titleEl.className = "json-barcode-title";
+  titleEl.textContent = meta.title;
+  lab.appendChild(titleEl);
+  if (meta.context) {
+    const ctx = document.createElement("div");
+    ctx.className = "json-barcode-context";
+    ctx.textContent = meta.context;
+    lab.appendChild(ctx);
+  }
+
   const valueWrap = document.createElement("div");
   valueWrap.className = "json-barcode-value";
   const typeRow = document.createElement("div");
@@ -479,7 +1007,7 @@ function appendJsonBarcodeCard(parent, entries, i) {
   typeSelect.setAttribute("aria-label", "Barcode symbology for this row");
   const followOpt = document.createElement("option");
   followOpt.value = "";
-  followOpt.textContent = "Select Barcode Type";
+  followOpt.textContent = "Use default";
   typeSelect.appendChild(followOpt);
   for (let oi = 0; oi < codeTypeSelect.options.length; oi += 1) {
     const src = codeTypeSelect.options[oi];
@@ -493,12 +1021,12 @@ function appendJsonBarcodeCard(parent, entries, i) {
   const valueLbl = document.createElement("label");
   valueLbl.className = "json-barcode-value-label";
   valueLbl.htmlFor = `json-barcode-value-${i}`;
-  valueLbl.textContent = "Encoded value (editable)";
+  valueLbl.textContent = "Encoded value";
   const valueInput = document.createElement("textarea");
   valueInput.id = `json-barcode-value-${i}`;
   valueInput.className = "json-barcode-value-text";
   valueInput.value = String(value ?? "");
-  valueInput.rows = Math.min(6, Math.max(2, String(value ?? "").split("\n").length));
+  valueInput.rows = Math.min(4, Math.max(2, String(value ?? "").split("\n").length));
   valueInput.spellcheck = false;
   valueInput.setAttribute("aria-label", "Encoded value; edit to update barcode");
   valueWrap.append(typeRow, valueLbl, valueInput);
@@ -519,7 +1047,7 @@ function appendJsonBarcodeCard(parent, entries, i) {
     }
     drawBarcode(out, v, entryRenderFormat(entries[i]));
   });
-  row.append(lab, valueWrap, out);
+  row.append(lab, out, valueWrap);
   parent.appendChild(row);
 }
 
@@ -884,22 +1412,28 @@ function downloadLastJsonBarcodesCsv() {
 function renderJsonBarcodeGrid(entries) {
   jsonBarcodeMount.innerHTML = "";
   const bands = groupEntriesIntoLayoutBands(entries);
+  updateResultsSummary(entries, bands);
 
   for (const band of bands) {
-    const bandEl = document.createElement("div");
+    const bandEl = document.createElement("section");
     bandEl.className = `json-barcode-band json-barcode-band-${band.type}`;
     bandEl.dataset.bandKey = band.key;
+    appendBandHeader(bandEl, band, entries);
+
+    const cards = document.createElement("div");
+    cards.className = "band-cards";
     let prevBlock = null;
 
     for (const i of band.items) {
       const blockKey = jsonBarcodeBlockKey(entries[i].label);
       if (band.type === "delivery" && prevBlock !== null && shouldInsertBarcodeItemGap(prevBlock, blockKey)) {
-        appendJsonBarcodeGapRow(bandEl);
+        appendJsonBarcodeGapRow(cards);
       }
       prevBlock = blockKey;
-      appendJsonBarcodeCard(bandEl, entries, i);
+      appendJsonBarcodeCard(cards, entries, i);
     }
 
+    bandEl.appendChild(cards);
     jsonBarcodeMount.appendChild(bandEl);
   }
   updateJsonExportSelect();
@@ -971,7 +1505,9 @@ jsonClearBtn.addEventListener("click", () => {
   clearJsonError();
   jsonBarcodeMount.innerHTML = "";
   lastJsonEntries = null;
+  hideResultsSummary();
   updateJsonExportSelect();
+  showApiStatus("");
 });
 
 jsonExportSelect.addEventListener("change", () => {
@@ -1107,5 +1643,90 @@ codeTypeSelect.addEventListener("change", () => {
   }
 });
 
+apiFetchBtn?.addEventListener("click", () => {
+  void fetchShipmentAndGenerate();
+});
+
+apiClearTokenBtn?.addEventListener("click", () => {
+  if (apiBearerToken) apiBearerToken.value = "";
+  sessionStorage.removeItem(TOKEN_SESSION_KEY);
+  updateTokenExpiryUi();
+  showApiStatus("Token cleared from this session.");
+});
+
+toggleTokenBtn?.addEventListener("click", () => {
+  if (!apiBearerToken) return;
+  const showing = apiBearerToken.type === "text";
+  apiBearerToken.type = showing ? "password" : "text";
+  toggleTokenBtn.textContent = showing ? "Show" : "Hide";
+});
+
+apiEnv?.addEventListener("change", updateApiUrlPreview);
+apiShipmentNumber?.addEventListener("input", updateApiUrlPreview);
+apiBearerToken?.addEventListener("input", () => {
+  updateTokenExpiryUi();
+  const token = normalizeBearerToken(apiBearerToken.value || "");
+  if (token) {
+    try {
+      sessionStorage.setItem(TOKEN_SESSION_KEY, token);
+    } catch {
+      /* ignore */
+    }
+  } else {
+    sessionStorage.removeItem(TOKEN_SESSION_KEY);
+  }
+});
+
+apiShipmentNumber?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void fetchShipmentAndGenerate();
+  }
+});
+
+try {
+  const savedToken = sessionStorage.getItem(TOKEN_SESSION_KEY);
+  const savedEnv = sessionStorage.getItem(ENV_SESSION_KEY);
+  const savedSn = sessionStorage.getItem(SHIPMENT_SESSION_KEY);
+  if (savedToken && apiBearerToken) apiBearerToken.value = savedToken;
+  if (savedEnv && apiEnv && API_ENV_HOSTS[savedEnv]) {
+    apiEnv.value = savedEnv === "stage" ? "stg" : savedEnv;
+  }
+  if (savedSn && apiShipmentNumber) apiShipmentNumber.value = savedSn;
+} catch {
+  /* ignore */
+}
+
+updateApiUrlPreview();
+startTokenExpiryWatcher();
 refreshSavedJsonSelect();
 updateJsonExportSelect();
+hideResultsSummary();
+
+function setActiveTab(tabName) {
+  const tabs = document.querySelectorAll(".app-tab");
+  const panels = {
+    json: document.getElementById("panelJson"),
+    api: document.getElementById("panelApi")
+  };
+  for (const btn of tabs) {
+    const active = btn.dataset.tab === tabName;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  }
+  for (const [name, panel] of Object.entries(panels)) {
+    if (!panel) continue;
+    const active = name === tabName;
+    panel.classList.toggle("is-active", active);
+    panel.hidden = !active;
+  }
+  if (tabName === "api") updateTokenExpiryUi();
+}
+
+document.querySelectorAll(".app-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    setActiveTab(btn.dataset.tab || "json");
+  });
+});
+
+setActiveTab("json");
