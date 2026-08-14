@@ -523,10 +523,20 @@ function parseLabelContext(label) {
   };
 }
 
-function buildShipmentApiUrl(env, shipmentNumber) {
-  const base = API_ENV_HOSTS[env] || API_ENV_HOSTS.qa;
+function buildShipmentApiUrl(env, shipmentNumber, { useProxy = shouldUseLocalApiProxy() } = {}) {
   const sn = encodeURIComponent(String(shipmentNumber || "").trim());
-  return `${base}/api/syncShipmentDetail/${sn}?getFullDetail=True`;
+  const pathAndQuery = `/api/syncShipmentDetail/${sn}?getFullDetail=True`;
+  if (useProxy) {
+    const e = encodeURIComponent(String(env || "qa"));
+    return `/api-proxy/${e}${pathAndQuery}`;
+  }
+  const base = API_ENV_HOSTS[env] || API_ENV_HOSTS.qa;
+  return `${base}${pathAndQuery}`;
+}
+
+function shouldUseLocalApiProxy() {
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1";
 }
 
 function collectApiErrorText(node, depth = 0) {
@@ -745,7 +755,12 @@ function updateApiUrlPreview() {
   if (!apiUrlPreview) return;
   const env = apiEnv?.value || "qa";
   const sn = apiShipmentNumber?.value.trim() || "{shipmentId}";
-  apiUrlPreview.textContent = buildShipmentApiUrl(env, sn);
+  const direct = buildShipmentApiUrl(env, sn, { useProxy: false });
+  if (shouldUseLocalApiProxy()) {
+    apiUrlPreview.textContent = `${direct}  ·  via local GET proxy`;
+  } else {
+    apiUrlPreview.textContent = direct;
+  }
 }
 
 function showApiStatus(msg, isError) {
@@ -817,6 +832,8 @@ async function fetchShipmentAndGenerate() {
 
     const res = await fetch(url, {
       method: "GET",
+      mode: "cors",
+      cache: "no-store",
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${token}`
@@ -867,9 +884,15 @@ async function fetchShipmentAndGenerate() {
     const raw = err?.message || String(err);
     let msg = raw;
     if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(raw)) {
-      msg =
-        `Network error calling ${env.toUpperCase()}. Check the shipment id, environment URL, and CORS. ` +
-        "If the browser blocked the request, paste JSON on the JSON tab instead.";
+      if (shouldUseLocalApiProxy()) {
+        msg =
+          `GET request failed on ${env.toUpperCase()}. Restart with \`python3 serve.py\` ` +
+          "(not plain http.server) so the local API proxy can bypass CORS.";
+      } else {
+        msg =
+          `GET request blocked by CORS on ${env.toUpperCase()}. ` +
+          "The API must allow this website origin, or run locally with \`python3 serve.py\`.";
+      }
     }
     showApiStatus(msg, true);
     showJsonError(msg);

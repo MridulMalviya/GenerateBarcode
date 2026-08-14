@@ -25,12 +25,18 @@ Both tabs share the same barcode results area below.
 
 ## Run locally
 
+Use the included proxy server (required for API fetch — Azure CORS blocks browser calls from localhost):
+
 ```bash
 cd GenerateBarcode
-python3 -m http.server 8080
+python3 serve.py
 ```
 
 Open **http://localhost:8080**.
+
+The page uses **GET**  
+`/api/syncShipmentDetail/{id}?getFullDetail=True`  
+through a local proxy at `/api-proxy/{env}/...`.
 
 ## Repository
 
