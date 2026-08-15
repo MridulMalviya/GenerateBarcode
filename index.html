@@ -257,9 +257,34 @@
           </div>
           <div id="resultsLegend" class="results-legend"></div>
         </div>
+        <div id="shipmentDetailsMount" class="shipment-details-mount"></div>
         <div id="jsonBarcodeMount" class="json-barcode-mount"></div>
       </section>
     </main>
+
+    <div id="detailsModal" class="details-modal" hidden>
+      <div class="details-modal-backdrop" data-close-details-modal></div>
+      <div
+        class="details-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="detailsModalTitle"
+      >
+        <div class="details-modal-header">
+          <h3 id="detailsModalTitle">Delivery info</h3>
+          <button
+            type="button"
+            id="detailsModalClose"
+            class="details-modal-close"
+            aria-label="Close details"
+            data-close-details-modal
+          >
+            ×
+          </button>
+        </div>
+        <div id="detailsModalBody" class="details-modal-body"></div>
+      </div>
+    </div>
 
     <script src="./script.js"></script>
   </body>

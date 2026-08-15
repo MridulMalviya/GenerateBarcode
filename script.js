@@ -9,6 +9,10 @@ const jsonClearBtn = document.getElementById("jsonClearBtn");
 const jsonExportSelect = document.getElementById("jsonExportSelect");
 const jsonError = document.getElementById("jsonError");
 const jsonBarcodeMount = document.getElementById("jsonBarcodeMount");
+const shipmentDetailsMount = document.getElementById("shipmentDetailsMount");
+const detailsModal = document.getElementById("detailsModal");
+const detailsModalTitle = document.getElementById("detailsModalTitle");
+const detailsModalBody = document.getElementById("detailsModalBody");
 const savedJsonSelect = document.getElementById("savedJsonSelect");
 const jsonLoadSavedBtn = document.getElementById("jsonLoadSavedBtn");
 const jsonSaveBtn = document.getElementById("jsonSaveBtn");
@@ -54,25 +58,124 @@ const API_ENV_HOSTS = {
 const FIELD_FRIENDLY_NAMES = {
   ShipmentNumber: "Shipment number",
   DeliveryNumber: "Delivery number",
+  BOL: "BOL",
+  BolNumber: "BOL",
+  BOLNumber: "BOL",
+  BillOfLading: "BOL",
+  BillOfLadingNumber: "BOL",
   CompartmentNumber: "Compartment #",
   CompartmentBottomSeal: "Bottom seal",
   CompartmentEVDSeal: "EVD seal",
   CompartmentBatch: "Compartment batch",
+  CompartmentHU: "Compartment HU",
   TransporterBatchNumber: "Transporter batch",
+  TransporterSerialNumber: "Transporter serial",
+  ShipmentDeliveryItemSerialNumbers: "Item serial numbers",
   StorageUnitNumber: "Storage unit",
   GTIN: "GTIN",
   EANNumber: "EAN",
   YSLDPackageCode: "YSLD package",
   ProductNumber: "Product number",
+  MaterialNumber: "Material number",
   "EquipmentNumber/ProductNumber": "Equipment / Product",
+  "EquipmentNumber/MaterialNumber": "Equipment / Material",
   "EquipmentNumber/EANNumber": "Equipment / EAN",
   "EquipmentNumber/GTIN": "Equipment / GTIN",
   "EquipmentNumber/FormulaCode": "Equipment / Formula",
   "EquipmentNumber/YSLDPackageCode": "Equipment / YSLD"
 };
 
+const BOL_FIELD_KEYS = ["BOL", "Bol", "BolNumber", "BOLNumber", "BillOfLading", "BillOfLadingNumber", "BoL"];
+
+const MOBILE_DETAIL_FIELDS = [
+  "DeliveryStatus",
+  "DeliveryType",
+  "DeliveryQuantity",
+  "DeliveryQuantityUOM",
+  "EquipmentNumber",
+  "SerialNumber",
+  "TankCapacity",
+  "TankCapacityUnitOfMeasure",
+  "LockCombination",
+  "IsBluetoothLock",
+  "IsPrimaryCodeUpdated",
+  "ATEXRequirement",
+  "IsManifoldTank",
+  "MobileDeviceDeliveryAllowed",
+  "EquipmentLatitude",
+  "EquipmentLongitude",
+  "TankCapacityUOM",
+  "IsPODSignatureRequired",
+  "IsDropOff",
+  "IsDropOffAtDelivery",
+  "IsMarkedDropOff",
+  "IsLabelInstalled",
+  "IsReviewed",
+  "IsIMSiteItem",
+  "LastSyncDateTime"
+];
+
+const SHIPMENT_DETAIL_FIELDS = ["ShipmentStatus"];
+
+const DETAIL_FIELD_LABELS = {
+  DeliveryStatus: "Delivery Status",
+  ShipmentStatus: "Shipment Status",
+  DeliveryType: "Delivery Type",
+  DeliveryQuantity: "Delivery Quantity",
+  DeliveryQuantityUOM: "Delivery Quantity UOM",
+  EquipmentNumber: "Equipment Number",
+  SerialNumber: "Serial Number",
+  TankCapacity: "Tank Capacity",
+  TankCapacityUnitOfMeasure: "Tank Capacity UOM",
+  TankCapacityUOM: "Tank Capacity UOM",
+  LockCombination: "Lock Combination",
+  IsBluetoothLock: "Bluetooth Lock",
+  IsPrimaryCodeUpdated: "Primary Code Updated",
+  ATEXRequirement: "ATEX Requirement",
+  IsManifoldTank: "Manifold Tank",
+  MobileDeviceDeliveryAllowed: "Mobile Device Delivery Allowed",
+  EquipmentLatitude: "Equipment Latitude",
+  EquipmentLongitude: "Equipment Longitude",
+  IsPODSignatureRequired: "POD Signature Required",
+  IsDropOff: "Drop Off",
+  IsDropOffAtDelivery: "Drop Off",
+  IsLabelInstalled: "Label Installed",
+  IsReviewed: "Reviewed",
+  IsMarkedDropOff: "Marked Drop Off",
+  IsIMSiteItem: "IM Site Item",
+  LastSyncDateTime: "Last Sync"
+};
+
+const HIGHLIGHT_DETAIL_FIELDS = new Set(["DeliveryStatus", "ShipmentStatus"]);
+const DROP_OFF_DETAIL_FIELDS = new Set(["IsDropOff", "IsDropOffAtDelivery", "IsMarkedDropOff"]);
+
+const CUSTOMER_DETAIL_FIELDS = [
+  "CustomerName",
+  "CustomerNumber",
+  "CustomerCode",
+  "SoldToName",
+  "SoldToNumber",
+  "ShipToName",
+  "ShipToNumber",
+  "Address",
+  "Address1",
+  "Address2",
+  "Street",
+  "City",
+  "State",
+  "PostalCode",
+  "ZipCode",
+  "Country",
+  "Phone",
+  "Email"
+];
+
 /** @type {{ label: string, value: string }[] | null} */
 let lastJsonEntries = null;
+/** @type {{ title: string, rows: any[], matchKey?: string }[]} */
+let lastDetailPanels = [];
+/** @type {{ shipmentNumber: string, expectedDeliveries: number|null, expectedItems: number|null, deliveryCount: number, itemCount: number } | null} */
+let lastShipmentMeta = null;
 
 function drawBarcode(outputEl, value, format) {
   outputEl.innerHTML = "";
@@ -118,18 +221,717 @@ function drawBarcode(outputEl, value, format) {
   }
 }
 
-function pushField(rows, label, val) {
-  if (val === null || val === undefined) return;
+function barcodeValueParts(val) {
+  if (val === null || val === undefined) return [];
+  if (Array.isArray(val)) {
+    return val.flatMap((v) => barcodeValueParts(v)).filter(Boolean);
+  }
+  if (typeof val === "object") return [];
   const s = String(val).trim();
-  if (!s) return;
-  rows.push({ label, value: s });
+  if (!s || s === "{}" || s === "[]") return [];
+  return [s];
 }
 
+function pushField(rows, label, val) {
+  const parts = barcodeValueParts(val);
+  if (!parts.length) return;
+  if (parts.length === 1) {
+    rows.push({ label, value: parts[0] });
+    return;
+  }
+  // Keep multi-values as separate barcodes — never join into one
+  parts.forEach((part, i) => {
+    rows.push({ label: `${label} · ${i + 1}`, value: part });
+  });
+}
+
+function pickBolValue(obj) {
+  if (!obj || typeof obj !== "object") return undefined;
+  return firstDefined(obj, BOL_FIELD_KEYS);
+}
+
+function pushBolBarcode(rows, prefix, obj) {
+  const bol = pickBolValue(obj);
+  if (bol == null) return;
+  const label = prefix ? `${prefix} — BOL` : "BOL";
+  pushField(rows, label, bol);
+}
+
+/**
+ * One slash barcode per left/right pair. Never joins multiple materials/equipment into a single value.
+ */
 function pushSlashComposite(rows, label, left, right) {
-  const a = left != null && String(left).trim() ? String(left).trim() : "";
-  const b = right != null && String(right).trim() ? String(right).trim() : "";
-  if (!a || !b) return;
-  rows.push({ label, value: `${a}/${b}` });
+  const lefts = barcodeValueParts(left);
+  const rights = barcodeValueParts(right);
+  if (!lefts.length || !rights.length) return;
+
+  if (lefts.length === 1) {
+    rights.forEach((b, i) => {
+      rows.push({
+        label: rights.length === 1 ? label : `${label} · ${i + 1}`,
+        value: `${lefts[0]}/${b}`
+      });
+    });
+    return;
+  }
+  if (rights.length === 1) {
+    lefts.forEach((a, i) => {
+      rows.push({
+        label: lefts.length === 1 ? label : `${label} · ${i + 1}`,
+        value: `${a}/${rights[0]}`
+      });
+    });
+    return;
+  }
+  const n = Math.max(lefts.length, rights.length);
+  for (let i = 0; i < n; i += 1) {
+    rows.push({
+      label: `${label} · ${i + 1}`,
+      value: `${lefts[Math.min(i, lefts.length - 1)]}/${rights[Math.min(i, rights.length - 1)]}`
+    });
+  }
+}
+
+function pushSerialField(rows, label, val) {
+  if (val === null || val === undefined) return;
+  if (Array.isArray(val)) {
+    const joined = val
+      .map((v) => String(v ?? "").trim())
+      .filter(Boolean)
+      .join(", ");
+    pushField(rows, label, joined);
+    return;
+  }
+  if (typeof val === "object") {
+    try {
+      const s = JSON.stringify(val);
+      if (s && s !== "{}" && s !== "[]") pushField(rows, label, s);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  pushField(rows, label, val);
+}
+
+function formatDetailValue(val) {
+  if (val === null || val === undefined) return "";
+  if (typeof val === "boolean") return val ? "Yes" : "No";
+  if (Array.isArray(val)) return val.map((v) => formatDetailValue(v)).filter(Boolean).join(", ");
+  if (typeof val === "object") {
+    try {
+      return JSON.stringify(val);
+    } catch {
+      return "";
+    }
+  }
+  return String(val).trim();
+}
+
+function pickFirstValue(obj, keys) {
+  if (!obj || typeof obj !== "object") return "";
+  for (const key of keys) {
+    if (obj[key] === null || obj[key] === undefined) continue;
+    const s = formatDetailValue(obj[key]);
+    if (s !== "") return s;
+  }
+  return "";
+}
+
+function findCustomerObject(source) {
+  if (!source || typeof source !== "object") return null;
+  const candidates = [
+    source.Customer,
+    source.CustomerDetail,
+    source.CustomerDetails,
+    source.SoldTo,
+    source.ShipTo,
+    source.ShipToCustomer,
+    source.CustomerAddress,
+    source.DeliveryCustomer
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === "object" && !Array.isArray(c)) return c;
+  }
+  // Flat customer fields on the delivery/item itself
+  if (
+    source.CustomerName != null ||
+    source.CustomerNumber != null ||
+    source.Latitude != null ||
+    source.Longitude != null ||
+    source.Lat != null ||
+    source.Long != null
+  ) {
+    return source;
+  }
+  return null;
+}
+
+function buildMapUrl(lat, lng) {
+  const a = String(lat ?? "").trim();
+  const b = String(lng ?? "").trim();
+  if (!a || !b) return "";
+  if (!/^-?\d+(\.\d+)?$/.test(a) || !/^-?\d+(\.\d+)?$/.test(b)) return "";
+  return `https://www.google.com/maps?q=${encodeURIComponent(a)},${encodeURIComponent(b)}`;
+}
+
+function isDetailYes(value) {
+  const s = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return s === "yes" || s === "true" || s === "1";
+}
+
+function collectDetailRowsFromObject(obj, fieldNames) {
+  const rows = [];
+  if (!obj || typeof obj !== "object") return rows;
+  const used = new Set();
+  for (const key of fieldNames) {
+    let fieldKey = key;
+    let label = DETAIL_FIELD_LABELS[key] || key;
+    let value = "";
+    if (key === "IsDropOff" || key === "IsDropOffAtDelivery" || key === "IsDropOffatDelivery") {
+      // Prefer explicit IsDropOff; keep a single Drop Off row
+      if (used.has("Drop Off")) continue;
+      const raw = firstDefined(obj, ["IsDropOff", "IsDropOffAtDelivery", "IsDropOffatDelivery"]);
+      // firstDefined skips false? — use dedicated boolean read
+      const boolRaw = readDetailBool(obj, ["IsDropOff", "IsDropOffAtDelivery", "IsDropOffatDelivery"]);
+      if (boolRaw === undefined && (raw === undefined || raw === null || raw === "")) continue;
+      value = formatDetailValue(boolRaw !== undefined ? boolRaw : raw);
+      label = "Drop Off";
+      fieldKey = "IsDropOff";
+    } else if (key === "IsMarkedDropOff") {
+      const boolRaw = readDetailBool(obj, ["IsMarkedDropOff"]);
+      if (boolRaw === undefined) continue;
+      value = formatDetailValue(boolRaw);
+      label = "Marked Drop Off";
+      fieldKey = "IsMarkedDropOff";
+    } else if (key === "TankCapacityUnitOfMeasure" || key === "TankCapacityUOM") {
+      // Prefer TankCapacityUnitOfMeasure; avoid duplicate UOM rows
+      if (used.has("Tank Capacity UOM")) continue;
+      value = formatDetailValue(
+        firstDefined(obj, ["TankCapacityUnitOfMeasure", "TankCapacityUOM"])
+      );
+      label = "Tank Capacity UOM";
+      fieldKey = "TankCapacityUnitOfMeasure";
+    } else if (key === "EquipmentLatitude") {
+      value = formatDetailValue(
+        firstDefined(obj, ["EquipmentLatitude", "EquipmentLat"])
+      );
+    } else if (key === "EquipmentLongitude") {
+      value = formatDetailValue(
+        firstDefined(obj, ["EquipmentLongitude", "EquipmentLong", "EquipmentLng"])
+      );
+    } else {
+      value = formatDetailValue(firstDefined(obj, [key]));
+    }
+    if (value === "") continue;
+    used.add(label);
+    const highlight =
+      HIGHLIGHT_DETAIL_FIELDS.has(fieldKey) ||
+      (DROP_OFF_DETAIL_FIELDS.has(fieldKey) && isDetailYes(value));
+    rows.push({
+      label,
+      value,
+      fieldKey,
+      highlight
+    });
+  }
+
+  appendEquipmentMapRow(obj, rows);
+  return rows;
+}
+
+/** Read boolean-ish fields including explicit false. */
+function readDetailBool(obj, keys) {
+  if (!obj || typeof obj !== "object") return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] !== null && obj[key] !== undefined) {
+      const v = obj[key];
+      if (typeof v === "boolean") return v;
+      if (typeof v === "number") return v !== 0;
+      const s = String(v).trim().toLowerCase();
+      if (s === "true" || s === "yes" || s === "1") return true;
+      if (s === "false" || s === "no" || s === "0") return false;
+    }
+    const found = Object.keys(obj).find((k) => k.toLowerCase() === key.toLowerCase());
+    if (found && obj[found] !== null && obj[found] !== undefined) {
+      const v = obj[found];
+      if (typeof v === "boolean") return v;
+      if (typeof v === "number") return v !== 0;
+      const s = String(v).trim().toLowerCase();
+      if (s === "true" || s === "yes" || s === "1") return true;
+      if (s === "false" || s === "no" || s === "0") return false;
+    }
+  }
+  return undefined;
+}
+
+function panelsHaveDropOff(panels) {
+  if (!panels?.length) return false;
+  for (const panel of panels) {
+    for (const row of panel.rows || []) {
+      if (DROP_OFF_DETAIL_FIELDS.has(row.fieldKey) && isDetailYes(row.value)) return true;
+    }
+  }
+  return false;
+}
+
+function appendEquipmentMapRow(obj, rows) {
+  if (!obj || !rows) return;
+  if (rows.some((r) => r.fieldKey === "EquipmentMap" || r.label === "Equipment map")) return;
+  const lat =
+    rows.find((r) => r.fieldKey === "EquipmentLatitude")?.value ||
+    formatDetailValue(firstDefined(obj, ["EquipmentLatitude", "EquipmentLat"]));
+  const lng =
+    rows.find((r) => r.fieldKey === "EquipmentLongitude")?.value ||
+    formatDetailValue(firstDefined(obj, ["EquipmentLongitude", "EquipmentLong", "EquipmentLng"]));
+  const mapUrl = buildMapUrl(lat, lng);
+  if (!mapUrl) return;
+  rows.push({
+    label: "Equipment map",
+    value: `${lat}, ${lng}`,
+    href: mapUrl,
+    isLink: true,
+    fieldKey: "EquipmentMap"
+  });
+}
+
+function findStatusValue(panels, fieldKey) {
+  if (!panels?.length) return "";
+  for (const panel of panels) {
+    for (const row of panel.rows || []) {
+      if (row.fieldKey === fieldKey) return row.value;
+      if (row.label === DETAIL_FIELD_LABELS[fieldKey] || row.label === fieldKey) return row.value;
+    }
+  }
+  return "";
+}
+
+function statusTone(value) {
+  const s = String(value || "").trim().toLowerCase();
+  if (!s) return "neutral";
+  if (/(complete|delivered|closed|done|success|approved|active)/.test(s)) return "ok";
+  if (/(cancel|fail|error|reject|hold|block)/.test(s)) return "bad";
+  if (/(pending|open|in.?progress|draft|partial|ready|scheduled)/.test(s)) return "warn";
+  return "accent";
+}
+
+function createStatusBadge(label, value) {
+  const badge = document.createElement("span");
+  badge.className = `status-badge status-badge-${statusTone(value)}`;
+  badge.title = `${label}: ${value}`;
+  const lab = document.createElement("span");
+  lab.className = "status-badge-label";
+  lab.textContent = label;
+  const val = document.createElement("span");
+  val.className = "status-badge-value";
+  val.textContent = value;
+  badge.append(lab, val);
+  return badge;
+}
+
+function collectCustomerDetailRows(customer) {
+  const rows = collectDetailRowsFromObject(customer, CUSTOMER_DETAIL_FIELDS);
+  const lat = pickFirstValue(customer, ["Latitude", "Lat", "latitude", "lat", "CustomerLatitude"]);
+  const lng = pickFirstValue(customer, [
+    "Longitude",
+    "Long",
+    "Lng",
+    "longitude",
+    "long",
+    "lng",
+    "CustomerLongitude"
+  ]);
+  if (lat) rows.push({ label: "Latitude", value: lat });
+  if (lng) rows.push({ label: "Longitude", value: lng });
+  const mapUrl = buildMapUrl(lat, lng);
+  if (mapUrl) {
+    rows.push({
+      label: "Map location",
+      value: `${lat}, ${lng}`,
+      href: mapUrl,
+      isLink: true
+    });
+  }
+  return rows;
+}
+
+/**
+ * Info-only panels (no barcodes): delivery flags/status + customer with map link.
+ * @returns {{ title: string, rows: {label:string,value:string,href?:string,isLink?:boolean}[] }[]}
+ */
+function collectShipmentDetailPanels(payload) {
+  const root =
+    normalizeSyncShipmentPayload(payload) ||
+    unwrapNsapPayload(payload) ||
+    (payload?.ShipmentDetail ? payload : null) ||
+    payload;
+  if (!root || typeof root !== "object") return [];
+
+  const panels = [];
+
+  // Shipment-level status (highlighted)
+  const shipmentHost = root.ShipmentDetail && typeof root.ShipmentDetail === "object" ? root.ShipmentDetail : root;
+  let shipmentRows = collectDetailRowsFromObject(shipmentHost, SHIPMENT_DETAIL_FIELDS);
+  if (!shipmentRows.length) {
+    const ss = deepFindFirstValue(root, ["ShipmentStatus"]);
+    if (ss != null && String(ss).trim() !== "") {
+      shipmentRows = [
+        {
+          label: "Shipment Status",
+          value: formatDetailValue(ss),
+          fieldKey: "ShipmentStatus",
+          highlight: true
+        }
+      ];
+    }
+  }
+  if (shipmentRows.length) {
+    panels.push({ title: "Shipment details", rows: shipmentRows, matchKey: "^shipment" });
+  }
+
+  let deliveries = findArrayByNameHints(root, [
+    "ShipmentDeliveryDetails",
+    "ShipmentDeliveries",
+    "DeliveryDetails",
+    "Deliveries"
+  ]);
+  let items = findArrayByNameHints(root, [
+    "ShipmentDeliveryItemsDetails",
+    "ShipmentDeliveryItems",
+    "DeliveryItems",
+    "ItemsDetails",
+    "LineItems"
+  ]);
+
+  // Nested items under deliveries
+  if (deliveries.length) {
+    for (const del of deliveries) {
+      const nested = findArrayByNameHints(del, [
+        "ShipmentDeliveryItemsDetails",
+        "ShipmentDeliveryItems",
+        "DeliveryItems",
+        "Items",
+        "LineItems"
+      ]);
+      for (const it of nested) {
+        const copy = { ...it };
+        if (firstDefined(copy, ["ShipmentDeliveryId"]) == null && firstDefined(del, ["ShipmentDeliveryId"]) != null) {
+          copy.ShipmentDeliveryId = firstDefined(del, ["ShipmentDeliveryId"]);
+        }
+        items.push(copy);
+      }
+    }
+  }
+
+  // Objects that carry delivery detail flags even if not in a named delivery array
+  if (!deliveries.length) {
+    deliveries = deepCollectObjectsWithHints(root, MOBILE_DETAIL_FIELDS).filter((obj) => {
+      // Prefer delivery-like rows, skip pure customer-only objects
+      return (
+        firstDefined(obj, MOBILE_DETAIL_FIELDS) != null ||
+        firstDefined(obj, ["DeliveryNumber", "DeliveryStatus", "DeliveryType"]) != null
+      );
+    });
+  }
+
+  function deliveryMatchKey(del, index) {
+    if (deliveries.length) return nsapDeliveryPrefix(deliveries, del, index);
+    const dn = firstDefined(del, ["DeliveryNumber"]);
+    return dn != null ? String(dn).trim() : `delivery-${index + 1}`;
+  }
+
+  function deliveryTitle(del, index) {
+    const key = deliveryMatchKey(del, index);
+    return `Delivery details · ${key}`;
+  }
+
+  function customerTitle(del, index, itemLabel) {
+    const base = deliveryMatchKey(del, index);
+    return itemLabel ? `Customer details · ${base} · ${itemLabel}` : `Customer details · ${base}`;
+  }
+
+  if (deliveries.length) {
+    deliveries.forEach((del, index) => {
+      const matchKey = deliveryMatchKey(del, index);
+      const deliveryRows = collectDetailRowsFromObject(del, MOBILE_DETAIL_FIELDS);
+      // Also pull detail fields from matching items if delivery object is sparse
+      if (!deliveryRows.length && items.length) {
+        const delId = firstDefined(del, ["ShipmentDeliveryId"]);
+        const dn = firstDefined(del, ["DeliveryNumber"]);
+        for (const it of items) {
+          const sameId =
+            delId != null &&
+            firstDefined(it, ["ShipmentDeliveryId"]) != null &&
+            String(firstDefined(it, ["ShipmentDeliveryId"])) === String(delId);
+          const sameDn =
+            dn != null &&
+            firstDefined(it, ["DeliveryNumber"]) != null &&
+            String(firstDefined(it, ["DeliveryNumber"])) === String(dn);
+          if (sameId || sameDn) {
+            const extra = collectDetailRowsFromObject(it, MOBILE_DETAIL_FIELDS);
+            for (const row of extra) {
+              if (!deliveryRows.some((r) => r.label === row.label)) deliveryRows.push(row);
+            }
+          }
+        }
+      }
+      if (deliveryRows.length) {
+        panels.push({ title: deliveryTitle(del, index), rows: deliveryRows, matchKey });
+      }
+
+      const customer = findCustomerObject(del) || findCustomerObjectDeep(del);
+      const customerRows = customer ? collectCustomerDetailRows(customer) : [];
+      if (customerRows.length) {
+        panels.push({ title: customerTitle(del, index), rows: customerRows, matchKey });
+      }
+
+      const delId = firstDefined(del, ["ShipmentDeliveryId"]);
+      const lineItems = items.filter((it) => {
+        const sid = firstDefined(it, ["ShipmentDeliveryId"]);
+        return delId != null && sid != null && String(sid) === String(delId);
+      });
+      lineItems.forEach((it) => {
+        const itemCustomer = findCustomerObject(it) || findCustomerObjectDeep(it);
+        if (!itemCustomer || itemCustomer === customer) return;
+        const itemCustomerRows = collectCustomerDetailRows(itemCustomer);
+        if (!itemCustomerRows.length) return;
+        const itemId = firstDefined(it, ["ShipmentDeliveryItemId"]);
+        panels.push({
+          title: customerTitle(del, index, itemId != null ? `Item ${itemId}` : "Item"),
+          rows: itemCustomerRows,
+          matchKey
+        });
+      });
+    });
+  } else {
+    // Flat / unknown shape: gather detail fields from anywhere
+    const detailHosts = deepCollectObjectsWithHints(root, MOBILE_DETAIL_FIELDS);
+    detailHosts.forEach((obj, index) => {
+      const matchKey = deliveryMatchKey(obj, index);
+      const rows = collectDetailRowsFromObject(obj, MOBILE_DETAIL_FIELDS);
+      if (rows.length) {
+        panels.push({ title: deliveryTitle(obj, index), rows, matchKey });
+      }
+      const customer = findCustomerObject(obj) || findCustomerObjectDeep(obj);
+      const customerRows = customer ? collectCustomerDetailRows(customer) : [];
+      if (customerRows.length) {
+        panels.push({ title: customerTitle(obj, index), rows: customerRows, matchKey });
+      }
+    });
+  }
+
+  // Root / shipment-level customer fallback
+  if (!panels.some((p) => p.title.startsWith("Customer details"))) {
+    const rootCustomer =
+      findCustomerObject(root) ||
+      findCustomerObject(root.ShipmentDetail) ||
+      findCustomerObjectDeep(root) ||
+      findCustomerObject(payload);
+    const rows = rootCustomer ? collectCustomerDetailRows(rootCustomer) : [];
+    if (rows.length) panels.push({ title: "Customer details", rows, matchKey: "^shipment" });
+  }
+
+  // Lat/long-only fallback if customer panel exists without map link
+  if (!panels.some((p) => p.rows.some((r) => r.isLink))) {
+    const lat = deepFindFirstValue(root, ["Latitude", "Lat", "CustomerLatitude"]);
+    const lng = deepFindFirstValue(root, ["Longitude", "Long", "Lng", "CustomerLongitude"]);
+    const mapUrl = buildMapUrl(lat, lng);
+    if (mapUrl) {
+      let customerPanel = panels.find((p) => p.title.startsWith("Customer details"));
+      if (!customerPanel) {
+        customerPanel = { title: "Customer details", rows: [], matchKey: "^shipment" };
+        panels.push(customerPanel);
+      }
+      if (lat) customerPanel.rows.push({ label: "Latitude", value: String(lat) });
+      if (lng) customerPanel.rows.push({ label: "Longitude", value: String(lng) });
+      customerPanel.rows.push({
+        label: "Map location",
+        value: `${lat}, ${lng}`,
+        href: mapUrl,
+        isLink: true
+      });
+    }
+  }
+
+  return panels;
+}
+
+function findCustomerObjectDeep(source) {
+  if (!source || typeof source !== "object") return null;
+  const direct = findCustomerObject(source);
+  if (direct) return direct;
+  const nested = deepCollectObjectsWithHints(source, [
+    ...CUSTOMER_DETAIL_FIELDS,
+    "Latitude",
+    "Longitude",
+    "Lat",
+    "Long"
+  ]);
+  for (const obj of nested) {
+    const c = findCustomerObject(obj);
+    if (c) return c;
+  }
+  // Object itself has lat/long
+  if (
+    firstDefined(source, ["Latitude", "Lat", "CustomerLatitude"]) != null &&
+    firstDefined(source, ["Longitude", "Long", "Lng", "CustomerLongitude"]) != null
+  ) {
+    return source;
+  }
+  return null;
+}
+
+function clearShipmentDetails() {
+  lastDetailPanels = [];
+  lastShipmentMeta = null;
+  if (shipmentDetailsMount) shipmentDetailsMount.innerHTML = "";
+  closeDetailsModal();
+}
+
+function panelsForMatchKey(panels, matchKey) {
+  if (!panels?.length) return [];
+  if (!matchKey) return panels;
+  const exact = panels.filter((p) => p.matchKey === matchKey);
+  if (exact.length) return exact;
+  // Fuzzy: delivery band key "1 (#149661984)" vs panel key / delivery number
+  return panels.filter((p) => {
+    if (!p.matchKey) return false;
+    if (matchKey.includes(p.matchKey) || p.matchKey.includes(matchKey)) return true;
+    const dn = String(matchKey).match(/#([^)]+)\)/);
+    if (dn && String(p.matchKey).includes(dn[1])) return true;
+    return false;
+  });
+}
+
+function buildDetailsPanelHtml(panel) {
+  const section = document.createElement("section");
+  section.className = "detail-panel";
+  const head = document.createElement("div");
+  head.className = "detail-panel-head";
+  head.textContent = panel.title;
+  const grid = document.createElement("div");
+  grid.className = "detail-panel-grid";
+  // Highlighted status rows first
+  const ordered = [...panel.rows].sort((a, b) => Number(Boolean(b.highlight)) - Number(Boolean(a.highlight)));
+  for (const row of ordered) {
+    const item = document.createElement("div");
+    item.className = row.highlight ? "detail-item detail-item-highlight" : "detail-item";
+    if (row.fieldKey) item.dataset.field = row.fieldKey;
+    const lab = document.createElement("div");
+    lab.className = "detail-label";
+    lab.textContent = row.label;
+    const val = document.createElement("div");
+    val.className = "detail-value";
+    if (row.isLink && row.href) {
+      const a = document.createElement("a");
+      a.href = row.href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.className = "detail-map-link";
+      a.textContent = `Open in Maps (${row.value})`;
+      val.appendChild(a);
+    } else if (row.highlight) {
+      const badge = createStatusBadge(row.label, row.value);
+      if (DROP_OFF_DETAIL_FIELDS.has(row.fieldKey)) {
+        badge.classList.remove("status-badge-ok", "status-badge-warn", "status-badge-bad", "status-badge-accent", "status-badge-neutral");
+        badge.classList.add("status-badge-dropoff");
+      }
+      val.appendChild(badge);
+    } else {
+      val.textContent = row.value;
+    }
+    item.append(lab, val);
+    grid.appendChild(item);
+  }
+  section.append(head, grid);
+  return section;
+}
+
+function openDetailsModal(title, panels) {
+  if (!detailsModal || !detailsModalBody || !detailsModalTitle) return;
+  if (!panels?.length) return;
+  detailsModalTitle.textContent = title || "Delivery info";
+  detailsModalBody.innerHTML = "";
+  for (const panel of panels) {
+    detailsModalBody.appendChild(buildDetailsPanelHtml(panel));
+  }
+  detailsModal.hidden = false;
+  document.body.classList.add("modal-open");
+}
+
+function closeDetailsModal() {
+  if (!detailsModal) return;
+  detailsModal.hidden = true;
+  if (detailsModalBody) detailsModalBody.innerHTML = "";
+  document.body.classList.remove("modal-open");
+}
+
+function createInfoIconButton(label, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "info-icon-btn";
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
+  btn.innerHTML = `<span class="info-icon-glyph" aria-hidden="true">i</span>`;
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClick();
+  });
+  return btn;
+}
+
+/**
+ * Store detail panels for info-icon popups (not shown as always-visible cards).
+ */
+function renderShipmentDetails(panels) {
+  lastDetailPanels = Array.isArray(panels) ? panels : [];
+  if (shipmentDetailsMount) shipmentDetailsMount.innerHTML = "";
+}
+
+/** When there are no delivery barcode bands, show info icons in the details mount. */
+function renderDetailsInfoFallback(entries) {
+  if (!shipmentDetailsMount || !lastDetailPanels.length) return;
+  const bands = groupEntriesIntoLayoutBands(entries || []);
+  if (bands.some((b) => b.type === "delivery")) return;
+
+  const bar = document.createElement("div");
+  bar.className = "delivery-info-bar";
+  const label = document.createElement("span");
+  label.className = "delivery-info-bar-label";
+  label.textContent = "Delivery info";
+  bar.appendChild(label);
+  bar.appendChild(
+    createInfoIconButton("View delivery info", () => {
+      openDetailsModal("Delivery & customer info", lastDetailPanels);
+    })
+  );
+
+  const keys = [];
+  for (const p of lastDetailPanels) {
+    const key = p.matchKey || "^all";
+    if (key === "^shipment" || key === "^all") continue;
+    if (!keys.includes(key)) keys.push(key);
+  }
+  for (const key of keys) {
+    const related = panelsForMatchKey(lastDetailPanels, key);
+    if (!related.length) continue;
+    const wrap = document.createElement("span");
+    wrap.className = "delivery-info-chip";
+    const text = document.createElement("span");
+    text.className = "delivery-info-chip-text";
+    text.textContent = key;
+    wrap.appendChild(text);
+    wrap.appendChild(
+      createInfoIconButton(`View info for ${key}`, () => {
+        openDetailsModal(`Info · ${key}`, related);
+      })
+    );
+    bar.appendChild(wrap);
+  }
+  shipmentDetailsMount.appendChild(bar);
 }
 
 /** @param {unknown[]} deliveries */
@@ -223,9 +1025,24 @@ function collectNsapBarcodeRows(payload) {
   const detail = payload.ShipmentDetail || null;
   const deliveries = payload.ShipmentDeliveryDetails || [];
   const items = payload.ShipmentDeliveryItemsDetails || [];
+  const expectedDeliveries =
+    readCountField(payload, ["NoOfDeliveries", "NumberOfDeliveries"]) ??
+    readCountField(detail || {}, ["NoOfDeliveries", "NumberOfDeliveries"]);
+  const expectedItems =
+    readCountField(payload, ["NoOfDeliveryItems", "NumberOfDeliveryItems", "NoOfItems"]) ??
+    readCountField(detail || {}, ["NoOfDeliveryItems", "NumberOfDeliveryItems", "NoOfItems"]);
+  const shipmentNumber = String(detail?.ShipmentNumber ?? "").trim();
+  lastShipmentMeta = {
+    shipmentNumber,
+    expectedDeliveries,
+    expectedItems,
+    deliveryCount: deliveries.length,
+    itemCount: items.length
+  };
 
   if (detail) {
     pushField(rows, "ShipmentNumber", detail.ShipmentNumber);
+    pushBolBarcode(rows, "", detail);
   }
 
   function lineItemsForDelivery(del) {
@@ -258,48 +1075,58 @@ function collectNsapBarcodeRows(payload) {
     return "ShipmentDeliveryItemId (unspecified)";
   }
 
-  function pushNsapLineFields(deliveryPrefix, it) {
+  function pushNsapLineFields(deliveryPrefix, it, del) {
     const prefix = `${deliveryPrefix} — ${nsapItemClassPrefix(it)}`;
-    pushField(rows, `${prefix} — CompartmentNumber`, it.CompartmentNumber);
+    const equipment = it.EquipmentNumber ?? del?.EquipmentNumber;
+    const material = it.MaterialNumber ?? it.ProductNumber;
     pushField(rows, `${prefix} — CompartmentBottomSeal`, it.CompartmentBottomSeal);
     pushField(rows, `${prefix} — CompartmentEVDSeal`, it.CompartmentEVDSeal);
     if (showCompartmentBatchForContainerType(it)) {
       pushField(rows, `${prefix} — CompartmentBatch`, it.CompartmentBatch);
     }
-    pushField(rows, `${prefix} — TransporterBatchNumber`, it.TransporterBatchNumber);
     pushField(rows, `${prefix} — StorageUnitNumber`, it.StorageUnitNumber);
+    pushField(rows, `${prefix} — TransporterBatchNumber`, it.TransporterBatchNumber);
+    pushField(rows, `${prefix} — TransporterSerialNumber`, it.TransporterSerialNumber);
     pushField(rows, `${prefix} — GTIN`, it.GTIN);
     pushField(rows, `${prefix} — EANNumber`, it.EANNumber);
     pushField(rows, `${prefix} — YSLDPackageCode`, it.YSLDPackageCode);
     pushField(rows, `${prefix} — ProductNumber`, it.ProductNumber);
+    pushField(rows, `${prefix} — MaterialNumber`, it.MaterialNumber);
+    // Per item + equipment: EquipmentNumber/MaterialNumber
+    pushSlashComposite(
+      rows,
+      `${prefix} — Equipment ${equipment != null && String(equipment).trim() ? String(equipment).trim() : "1"} — EquipmentNumber/MaterialNumber`,
+      equipment,
+      material
+    );
     pushSlashComposite(
       rows,
       `${prefix} — EquipmentNumber/ProductNumber`,
-      it.EquipmentNumber,
+      equipment,
       it.ProductNumber
     );
     pushSlashComposite(
       rows,
       `${prefix} — EquipmentNumber/EANNumber`,
-      it.EquipmentNumber,
+      equipment,
       it.EANNumber
     );
     pushSlashComposite(
       rows,
       `${prefix} — EquipmentNumber/GTIN`,
-      it.EquipmentNumber,
+      equipment,
       it.GTIN
     );
     pushSlashComposite(
       rows,
       `${prefix} — EquipmentNumber/FormulaCode`,
-      it.EquipmentNumber,
+      equipment,
       it.FormulaCode
     );
     pushSlashComposite(
       rows,
       `${prefix} — EquipmentNumber/YSLDPackageCode`,
-      it.EquipmentNumber,
+      equipment,
       it.YSLDPackageCode
     );
   }
@@ -308,9 +1135,14 @@ function collectNsapBarcodeRows(payload) {
     const p = nsapDeliveryPrefix(deliveries, del, index);
 
     pushField(rows, `${p} — DeliveryNumber`, del.DeliveryNumber);
+    pushBolBarcode(rows, p, del);
+    // Delivery-level storage / transporter barcodes when present on the delivery itself
+    pushField(rows, `${p} — StorageUnitNumber`, del.StorageUnitNumber);
+    pushField(rows, `${p} — TransporterBatchNumber`, del.TransporterBatchNumber);
+    pushField(rows, `${p} — TransporterSerialNumber`, del.TransporterSerialNumber);
 
     for (const it of lineItemsForDelivery(del)) {
-      pushNsapLineFields(p, it);
+      pushNsapLineFields(p, it, del);
     }
   });
 
@@ -323,17 +1155,799 @@ function collectNsapBarcodeRows(payload) {
     if (sid != null && assigned.has(String(sid))) continue;
     const orphan = `Unmatched line (ShipmentDeliveryId ${sid ?? "none"})`;
     pushField(rows, `${orphan} — DeliveryNumber`, it.DeliveryNumber);
-    pushNsapLineFields(orphan, it);
+    pushNsapLineFields(orphan, it, null);
   }
 
   return dedupeRows(rows);
+}
+
+/**
+ * Barcodes for /api/syncShipmentDetail/{id}?getFullDetail=True — only the mobile CT fields.
+ */
+const SYNC_BARCODE_SIMPLE_FIELDS = [
+  "MaterialNumber",
+  "GTIN",
+  "EANNumber",
+  "YSLDPackageCode",
+  "StorageUnitNumber",
+  "CompartmentNumber",
+  "CompartmentBottomSeal",
+  "CompartmentEVDSeal",
+  "CompartmentBatch",
+  "CompartmentHU",
+  "TransporterBatchNumber",
+  "TransporterSerialNumber"
+];
+
+const SYNC_ITEM_HINT_KEYS = [
+  "MaterialNumber",
+  "CompartmentNumber",
+  "CompartmentEVDSeal",
+  "CompartmentBatch",
+  "CompartmentHU",
+  "TransporterBatchNumber",
+  "TransporterSerialNumber",
+  "ShipmentDeliveryItemSerialNumbers",
+  "StorageUnitNumber",
+  "YSLDPackageCode",
+  "EquipmentNumber"
+];
+
+function firstDefined(obj, keys) {
+  if (!obj || typeof obj !== "object") return undefined;
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null && String(obj[key]).trim() !== "") {
+      return obj[key];
+    }
+    // case-insensitive fallback
+    const found = Object.keys(obj).find((k) => k.toLowerCase() === key.toLowerCase());
+    if (found && obj[found] !== undefined && obj[found] !== null && String(obj[found]).trim() !== "") {
+      return obj[found];
+    }
+  }
+  return undefined;
+}
+
+function objectHasAnyHint(obj, hints) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  const keys = Object.keys(obj);
+  return hints.some((h) => keys.some((k) => k.toLowerCase() === h.toLowerCase()));
+}
+
+function deepFindFirstValue(node, keyNames, depth = 0, seen = new Set()) {
+  if (node == null || depth > 10) return undefined;
+  if (typeof node !== "object") return undefined;
+  if (seen.has(node)) return undefined;
+  seen.add(node);
+  if (!Array.isArray(node)) {
+    const direct = firstDefined(node, keyNames);
+    if (direct !== undefined) return direct;
+  }
+  const values = Array.isArray(node) ? node : Object.values(node);
+  for (const v of values) {
+    const found = deepFindFirstValue(v, keyNames, depth + 1, seen);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function deepCollectObjectsWithHints(node, hints, out = [], depth = 0, seen = new Set()) {
+  if (node == null || depth > 12) return out;
+  if (typeof node !== "object") return out;
+  if (seen.has(node)) return out;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    for (const item of node) deepCollectObjectsWithHints(item, hints, out, depth + 1, seen);
+    return out;
+  }
+  if (objectHasAnyHint(node, hints)) out.push(node);
+  for (const v of Object.values(node)) {
+    if (v && typeof v === "object") deepCollectObjectsWithHints(v, hints, out, depth + 1, seen);
+  }
+  return out;
+}
+
+function findArrayByNameHints(root, nameHints) {
+  const found = [];
+  function walk(node, depth = 0, seen = new Set()) {
+    if (!node || typeof node !== "object" || depth > 8 || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) return;
+    for (const [key, val] of Object.entries(node)) {
+      if (Array.isArray(val) && nameHints.some((h) => key.toLowerCase().includes(h.toLowerCase()))) {
+        found.push(...val.filter((x) => x && typeof x === "object"));
+      } else if (val && typeof val === "object") {
+        walk(val, depth + 1, seen);
+      }
+    }
+  }
+  walk(root);
+  return found;
+}
+
+const SYNC_DELIVERY_ARRAY_KEYS = [
+  "ShipmentDeliveryDetails",
+  "ShipmentDeliveries",
+  "DeliveryDetails",
+  "Deliveries"
+];
+
+const SYNC_ITEM_ARRAY_KEYS = [
+  "ShipmentDeliveryItemsDetails",
+  "ShipmentDeliveryItems",
+  "DeliveryItemsDetails",
+  "DeliveryItems",
+  "ItemsDetails",
+  "LineItems"
+];
+
+function readCountField(root, keys) {
+  const raw =
+    firstDefined(root, keys) ??
+    (root?.ShipmentDetail ? firstDefined(root.ShipmentDetail, keys) : undefined) ??
+    deepFindFirstValue(root, keys);
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function objectIdentityKey(obj, keySets) {
+  if (!obj || typeof obj !== "object") return null;
+  for (const keys of keySets) {
+    if (keys.length === 1) {
+      const v = firstDefined(obj, keys);
+      if (v != null && String(v).trim() !== "") return `${keys[0]}:${String(v).trim()}`;
+      continue;
+    }
+    const parts = keys.map((k) => firstDefined(obj, [k]));
+    if (parts.every((p) => p != null && String(p).trim() !== "")) {
+      return keys.map((k, i) => `${k}:${String(parts[i]).trim()}`).join("|");
+    }
+  }
+  return null;
+}
+
+function dedupeObjectsByIdentity(list, keySets) {
+  const seen = new Set();
+  const out = [];
+  let anon = 0;
+  for (const obj of list || []) {
+    if (!obj || typeof obj !== "object") continue;
+    let key = objectIdentityKey(obj, keySets);
+    if (!key) {
+      anon += 1;
+      key = `anon:${anon}`;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(obj);
+  }
+  return out;
+}
+
+/** Prefer exact array key names (not substring) so NoOfDeliveries etc. are ignored. */
+function collectArraysByExactKeys(root, keys) {
+  const out = [];
+  const seenArr = new Set();
+  function walk(node, depth = 0, seen = new Set()) {
+    if (!node || typeof node !== "object" || depth > 10 || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) return;
+    for (const [key, val] of Object.entries(node)) {
+      if (
+        Array.isArray(val) &&
+        keys.some((k) => k.toLowerCase() === String(key).toLowerCase())
+      ) {
+        if (seenArr.has(val)) continue;
+        seenArr.add(val);
+        for (const item of val) {
+          if (item && typeof item === "object" && !Array.isArray(item)) out.push(item);
+        }
+      } else if (val && typeof val === "object") {
+        walk(val, depth + 1, seen);
+      }
+    }
+  }
+  walk(root);
+  return out;
+}
+
+function looksLikeDeliveryObject(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  if (firstDefined(obj, ["ShipmentDeliveryItemId"]) != null) return false;
+  return (
+    firstDefined(obj, ["DeliveryNumber", "ShipmentDeliveryId", "DeliveryStatus", "DeliveryType"]) !=
+    null
+  );
+}
+
+function looksLikeItemObject(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  if (firstDefined(obj, ["ShipmentDeliveryItemId"]) != null) return true;
+  if (firstDefined(obj, ["MaterialNumber", "LineNumber"]) != null) return true;
+  return (
+    firstDefined(obj, ["CompartmentNumber", "CompartmentEVDSeal", "EquipmentNumber", "StorageUnitNumber"]) !=
+      null && firstDefined(obj, ["DeliveryNumber", "ShipmentDeliveryId"]) != null
+  );
+}
+
+function collectSyncDeliveriesAndItems(root) {
+  const expectedDeliveries = readCountField(root, ["NoOfDeliveries", "NumberOfDeliveries"]);
+  const expectedItems = readCountField(root, [
+    "NoOfDeliveryItems",
+    "NumberOfDeliveryItems",
+    "NoOfItems",
+    "NumberOfItems"
+  ]);
+
+  let deliveries = dedupeObjectsByIdentity(collectArraysByExactKeys(root, SYNC_DELIVERY_ARRAY_KEYS), [
+    ["ShipmentDeliveryId"],
+    ["DeliveryNumber"]
+  ]);
+
+  let items = dedupeObjectsByIdentity(collectArraysByExactKeys(root, SYNC_ITEM_ARRAY_KEYS), [
+    ["ShipmentDeliveryItemId"],
+    ["LineNumber", "ShipmentDeliveryId"],
+    ["LineNumber", "DeliveryNumber"]
+  ]);
+
+  // Nested items under each delivery (when root item array is missing/short)
+  if (!items.length || (expectedItems != null && items.length < expectedItems)) {
+    const nested = [];
+    for (const del of deliveries) {
+      const found = collectArraysByExactKeys(del, SYNC_ITEM_ARRAY_KEYS);
+      for (const it of found) {
+        const copy = { ...it };
+        if (
+          firstDefined(copy, ["ShipmentDeliveryId"]) == null &&
+          firstDefined(del, ["ShipmentDeliveryId"]) != null
+        ) {
+          copy.ShipmentDeliveryId = firstDefined(del, ["ShipmentDeliveryId"]);
+        }
+        if (
+          firstDefined(copy, ["DeliveryNumber"]) == null &&
+          firstDefined(del, ["DeliveryNumber"]) != null
+        ) {
+          copy.DeliveryNumber = firstDefined(del, ["DeliveryNumber"]);
+        }
+        nested.push(copy);
+      }
+    }
+    items = dedupeObjectsByIdentity([...items, ...nested], [
+      ["ShipmentDeliveryItemId"],
+      ["LineNumber", "ShipmentDeliveryId"],
+      ["LineNumber", "DeliveryNumber"]
+    ]);
+  }
+
+  if (!deliveries.length || (expectedDeliveries != null && deliveries.length < expectedDeliveries)) {
+    const more = deepCollectObjectsWithHints(root, [
+      "DeliveryNumber",
+      "ShipmentDeliveryId",
+      "DeliveryStatus"
+    ]).filter(looksLikeDeliveryObject);
+    deliveries = dedupeObjectsByIdentity([...deliveries, ...more], [
+      ["ShipmentDeliveryId"],
+      ["DeliveryNumber"]
+    ]);
+  }
+
+  if (!items.length || (expectedItems != null && items.length < expectedItems)) {
+    const more = deepCollectObjectsWithHints(root, SYNC_ITEM_HINT_KEYS).filter(looksLikeItemObject);
+    items = dedupeObjectsByIdentity([...items, ...more], [
+      ["ShipmentDeliveryItemId"],
+      ["LineNumber", "ShipmentDeliveryId"],
+      ["LineNumber", "DeliveryNumber"]
+    ]);
+  }
+
+  if (!items.length && deliveries.length) {
+    items = deliveries.slice();
+  }
+
+  return {
+    deliveries,
+    items,
+    expectedDeliveries,
+    expectedItems,
+    shipmentNumber:
+      String(
+        deepFindFirstValue(root, ["ShipmentNumber"]) ??
+          firstDefined(root.ShipmentDetail || {}, ["ShipmentNumber"]) ??
+          ""
+      ).trim()
+  };
+}
+
+function collectSyncShipmentBarcodeRows(payload) {
+  const rows = [];
+  const root = normalizeSyncShipmentPayload(payload) || payload;
+  if (!root || typeof root !== "object") {
+    lastShipmentMeta = null;
+    return rows;
+  }
+
+  const collected = collectSyncDeliveriesAndItems(root);
+  const { deliveries, items, expectedDeliveries, expectedItems, shipmentNumber } = collected;
+  pushField(rows, "ShipmentNumber", shipmentNumber);
+  pushBolBarcode(rows, "", root);
+  pushBolBarcode(rows, "", root.ShipmentDetail || {});
+
+  lastShipmentMeta = {
+    shipmentNumber,
+    expectedDeliveries,
+    expectedItems,
+    deliveryCount: deliveries.length,
+    itemCount: items.length
+  };
+
+  function pickItemField(it, keys) {
+    if (!it || typeof it !== "object") return undefined;
+    const direct = firstDefined(it, keys);
+    if (direct !== undefined) return direct;
+    for (const nestKey of [
+      "Equipment",
+      "EquipmentDetail",
+      "EquipmentDetails",
+      "Material",
+      "MaterialDetail",
+      "Product",
+      "ProductDetail"
+    ]) {
+      const nest = it[nestKey];
+      if (nest && typeof nest === "object" && !Array.isArray(nest)) {
+        const nested = firstDefined(nest, keys);
+        if (nested !== undefined) return nested;
+      }
+    }
+    return undefined;
+  }
+
+  function shipmentDeliveryItemIdOf(it) {
+    const id = firstDefined(it, ["ShipmentDeliveryItemId"]);
+    if (id == null) return "";
+    return String(id).trim();
+  }
+
+  /**
+   * Collect equipment-level records under a ShipmentDeliveryItem.
+   * Each entry can carry its own EquipmentNumber (+ optional MaterialNumber).
+   */
+  function collectEquipmentRecords(it, del) {
+    const out = [];
+    const seen = new Set();
+
+    function addEquip(source, fallbackMaterial) {
+      if (!source || typeof source !== "object") return;
+      const eqParts = barcodeValueParts(
+        firstDefined(source, ["EquipmentNumber"]) ?? source.EquipmentNumber
+      );
+      const matParts = barcodeValueParts(
+        firstDefined(source, ["MaterialNumber", "ProductNumber"]) ??
+          fallbackMaterial ??
+          firstDefined(source, ["MaterialNumber"])
+      );
+      const eqId = firstDefined(source, ["EquipmentId", "ShipmentEquipmentId", "Id"]);
+      for (const eq of eqParts.length ? eqParts : [""]) {
+        if (!eq) continue;
+        const materials = matParts.length ? matParts : barcodeValueParts(fallbackMaterial);
+        if (!materials.length) continue;
+        for (const mat of materials) {
+          const key = `${eq}\0${mat}\0${eqId ?? ""}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({
+            equipmentNumber: eq,
+            materialNumber: mat,
+            equipmentId: eqId != null ? String(eqId).trim() : ""
+          });
+        }
+      }
+    }
+
+    const itemMaterial =
+      pickItemField(it, ["MaterialNumber"]) ?? pickItemField(it, ["ProductNumber"]);
+
+    // Nested equipment arrays on the item
+    for (const key of [
+      "Equipments",
+      "EquipmentDetails",
+      "EquipmentList",
+      "ShipmentEquipments",
+      "EquipmentNumbers"
+    ]) {
+      const arr = it?.[key];
+      if (Array.isArray(arr)) {
+        for (const eqObj of arr) addEquip(eqObj, itemMaterial);
+      }
+    }
+
+    // Single nested equipment object
+    for (const key of ["Equipment", "EquipmentDetail"]) {
+      const obj = it?.[key];
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        addEquip(obj, itemMaterial);
+      }
+    }
+
+    // Flat EquipmentNumber on the item only when no nested equipment records exist
+    if (!out.length) {
+      const flatEq = it?.EquipmentNumber ?? firstDefined(it, ["EquipmentNumber"]);
+      if (flatEq != null) {
+        addEquip({ EquipmentNumber: flatEq, MaterialNumber: itemMaterial }, itemMaterial);
+      }
+    }
+
+    // Delivery-level equipment only when this item still has none
+    if (!out.length && del) {
+      const delEq = firstDefined(del, ["EquipmentNumber"]);
+      if (delEq != null && itemMaterial != null) {
+        addEquip({ EquipmentNumber: delEq, MaterialNumber: itemMaterial }, itemMaterial);
+      }
+      for (const key of ["Equipments", "EquipmentDetails", "EquipmentList"]) {
+        const arr = del?.[key];
+        if (Array.isArray(arr)) {
+          for (const eqObj of arr) addEquip(eqObj, itemMaterial);
+        }
+      }
+      if (del.Equipment && typeof del.Equipment === "object" && !Array.isArray(del.Equipment)) {
+        addEquip(del.Equipment, itemMaterial);
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * EquipmentNumber/MaterialNumber at Equipment level, scoped by ShipmentDeliveryItemId.
+   * One barcode per equipment (+ material) under that item.
+   */
+  function pushEquipmentMaterialForItem(deliveryPrefix, it, del) {
+    const itemId = shipmentDeliveryItemIdOf(it);
+    if (!itemId) return false;
+    const equipments = collectEquipmentRecords(it, del);
+    if (!equipments.length) return false;
+
+    const before = rows.length;
+    equipments.forEach((eq, index) => {
+      const parts = [`${deliveryPrefix} — ShipmentDeliveryItemId ${itemId}`];
+      if (eq.equipmentId) {
+        parts.push(`EquipmentId ${eq.equipmentId}`);
+      } else if (equipments.length > 1) {
+        parts.push(`Equipment ${index + 1}`);
+      } else {
+        parts.push(`Equipment ${eq.equipmentNumber}`);
+      }
+      const prefix = parts.join(" — ");
+      pushSlashComposite(
+        rows,
+        `${prefix} — EquipmentNumber/MaterialNumber`,
+        eq.equipmentNumber,
+        eq.materialNumber
+      );
+    });
+    return rows.length > before;
+  }
+
+  function itemPrefix(index, it, deliveryPrefix) {
+    const base = deliveryPrefix || String(index + 1);
+    const itemId = shipmentDeliveryItemIdOf(it);
+    if (itemId) return `${base} — ShipmentDeliveryItemId ${itemId}`;
+    const line = firstDefined(it, ["LineNumber"]);
+    if (line != null) return `${base} — LineNumber ${String(line).trim()}`;
+    return `${base} — item ${index + 1}`;
+  }
+
+  function deliveryPrefixForItem(it, fallbackIndex) {
+    for (let i = 0; i < deliveries.length; i += 1) {
+      const del = deliveries[i];
+      const dId = firstDefined(del, ["ShipmentDeliveryId"]);
+      const iId = firstDefined(it, ["ShipmentDeliveryId"]);
+      if (dId != null && iId != null && String(dId) === String(iId)) {
+        return nsapDeliveryPrefix(deliveries, del, i);
+      }
+      const dDn = firstDefined(del, ["DeliveryNumber"]);
+      const iDn = firstDefined(it, ["DeliveryNumber"]);
+      if (dDn != null && iDn != null && String(dDn) === String(iDn)) {
+        return nsapDeliveryPrefix(deliveries, del, i);
+      }
+    }
+    const dn = firstDefined(it, ["DeliveryNumber"]);
+    if (dn != null) return `#${String(dn).trim()}`;
+    const delId = firstDefined(it, ["ShipmentDeliveryId"]);
+    if (delId != null) return `delivery id ${String(delId).trim()}`;
+    return String(fallbackIndex + 1);
+  }
+
+  function pushSyncLineFields(prefix, it, del) {
+    // Other item-level barcodes (seals, material, etc.)
+    for (const field of SYNC_BARCODE_SIMPLE_FIELDS) {
+      pushField(rows, `${prefix} — ${field}`, it?.[field] ?? firstDefined(it, [field]));
+    }
+    pushSerialField(
+      rows,
+      `${prefix} — ShipmentDeliveryItemSerialNumbers`,
+      it?.ShipmentDeliveryItemSerialNumbers ??
+        firstDefined(it, ["ShipmentDeliveryItemSerialNumbers"])
+    );
+    // Equipment slash composites except Material (Material is handled by pushEquipmentMaterialForItem)
+    const equipment =
+      pickItemField(it, ["EquipmentNumber"]) ??
+      (del ? firstDefined(del, ["EquipmentNumber"]) : undefined);
+    pushSlashComposite(
+      rows,
+      `${prefix} — EquipmentNumber/FormulaCode`,
+      equipment,
+      it?.FormulaCode ?? firstDefined(it, ["FormulaCode"])
+    );
+    pushSlashComposite(
+      rows,
+      `${prefix} — EquipmentNumber/GTIN`,
+      equipment,
+      it?.GTIN ?? it?.Gtin ?? firstDefined(it, ["GTIN", "Gtin"])
+    );
+    pushSlashComposite(
+      rows,
+      `${prefix} — EquipmentNumber/EANNumber`,
+      equipment,
+      it?.EANNumber ?? it?.EanNumber ?? firstDefined(it, ["EANNumber", "EanNumber"])
+    );
+    pushSlashComposite(
+      rows,
+      `${prefix} — EquipmentNumber/YSLDPackageCode`,
+      equipment,
+      it?.YSLDPackageCode ?? firstDefined(it, ["YSLDPackageCode"])
+    );
+  }
+
+  function itemBelongsToDelivery(it, del) {
+    const dId = firstDefined(del, ["ShipmentDeliveryId"]);
+    const iId = firstDefined(it, ["ShipmentDeliveryId"]);
+    if (dId != null && iId != null && String(dId) === String(iId)) return true;
+    const dDn = firstDefined(del, ["DeliveryNumber"]);
+    const iDn = firstDefined(it, ["DeliveryNumber"]);
+    return dDn != null && iDn != null && String(dDn) === String(iDn);
+  }
+
+  function enrichItemFromDelivery(it, del) {
+    const enriched = { ...it };
+    if (!del) return enriched;
+    for (const field of [
+      "EquipmentNumber",
+      "StorageUnitNumber",
+      "TransporterBatchNumber",
+      "TransporterSerialNumber"
+    ]) {
+      const itemEmpty =
+        enriched[field] == null ||
+        (typeof enriched[field] !== "object" && String(enriched[field]).trim() === "");
+      const delVal = del[field];
+      if (
+        itemEmpty &&
+        delVal != null &&
+        (typeof delVal === "object" || String(delVal).trim() !== "")
+      ) {
+        enriched[field] = delVal;
+      }
+    }
+    if (
+      (enriched.DeliveryNumber == null || String(enriched.DeliveryNumber).trim() === "") &&
+      del.DeliveryNumber != null
+    ) {
+      enriched.DeliveryNumber = del.DeliveryNumber;
+    }
+    if (
+      (enriched.ShipmentDeliveryId == null || String(enriched.ShipmentDeliveryId).trim() === "") &&
+      del.ShipmentDeliveryId != null
+    ) {
+      enriched.ShipmentDeliveryId = del.ShipmentDeliveryId;
+    }
+    return enriched;
+  }
+
+  function sortByShipmentDeliveryItemId(list) {
+    return list.slice().sort((a, b) => {
+      const ia = Number(shipmentDeliveryItemIdOf(a));
+      const ib = Number(shipmentDeliveryItemIdOf(b));
+      if (Number.isFinite(ia) && Number.isFinite(ib) && ia !== ib) return ia - ib;
+      return shipmentDeliveryItemIdOf(a).localeCompare(shipmentDeliveryItemIdOf(b));
+    });
+  }
+
+  const usedItemKeys = new Set();
+  const eqMaterialItemIds = new Set();
+
+  // Delivery → ShipmentDeliveryItems: EquipmentNumber/MaterialNumber by ShipmentDeliveryItemId
+  deliveries.forEach((del, dIndex) => {
+    const p = nsapDeliveryPrefix(deliveries, del, dIndex);
+    pushField(rows, `${p} — DeliveryNumber`, firstDefined(del, ["DeliveryNumber"]));
+    pushBolBarcode(rows, p, del);
+    pushField(rows, `${p} — StorageUnitNumber`, firstDefined(del, ["StorageUnitNumber"]));
+    pushField(rows, `${p} — TransporterBatchNumber`, firstDefined(del, ["TransporterBatchNumber"]));
+    pushField(rows, `${p} — TransporterSerialNumber`, firstDefined(del, ["TransporterSerialNumber"]));
+
+    const lineItems = sortByShipmentDeliveryItemId(
+      items.filter((it) => itemBelongsToDelivery(it, del))
+    );
+    lineItems.forEach((it, itemIndex) => {
+      const itemId = shipmentDeliveryItemIdOf(it);
+      const idKey =
+        (itemId && `ShipmentDeliveryItemId:${itemId}`) ||
+        objectIdentityKey(it, [
+          ["ShipmentDeliveryItemId"],
+          ["LineNumber", "ShipmentDeliveryId"],
+          ["LineNumber", "DeliveryNumber"]
+        ]) ||
+        `anon:${dIndex}:${itemIndex}`;
+      usedItemKeys.add(idKey);
+      const enriched = enrichItemFromDelivery(it, del);
+      pushSyncLineFields(itemPrefix(itemIndex, enriched, p), enriched, del);
+      if (pushEquipmentMaterialForItem(p, enriched, del) && itemId) {
+        eqMaterialItemIds.add(itemId);
+      }
+    });
+  });
+
+  // Orphan ShipmentDeliveryItems not matched to a delivery
+  sortByShipmentDeliveryItemId(items).forEach((it, index) => {
+    const itemId = shipmentDeliveryItemIdOf(it);
+    const idKey =
+      (itemId && `ShipmentDeliveryItemId:${itemId}`) ||
+      objectIdentityKey(it, [
+        ["ShipmentDeliveryItemId"],
+        ["LineNumber", "ShipmentDeliveryId"],
+        ["LineNumber", "DeliveryNumber"]
+      ]) ||
+      `orphan:${index}`;
+    if (usedItemKeys.has(idKey)) return;
+    const dPrefix = deliveryPrefixForItem(it, index);
+    pushField(rows, `${dPrefix} — DeliveryNumber`, firstDefined(it, ["DeliveryNumber"]));
+    const enriched = enrichItemFromDelivery(it, null);
+    pushSyncLineFields(itemPrefix(index, enriched, dPrefix), enriched, null);
+    if (pushEquipmentMaterialForItem(dPrefix, enriched, null) && itemId) {
+      eqMaterialItemIds.add(itemId);
+    }
+  });
+
+  // Final pass: every ShipmentDeliveryItemId must get EquipmentNumber/MaterialNumber when both sides exist
+  sortByShipmentDeliveryItemId(items).forEach((it) => {
+    const itemId = shipmentDeliveryItemIdOf(it);
+    if (!itemId || eqMaterialItemIds.has(itemId)) return;
+    const parentDel =
+      deliveries.find((del) => itemBelongsToDelivery(it, del)) || null;
+    const dPrefix = parentDel
+      ? nsapDeliveryPrefix(deliveries, parentDel, deliveries.indexOf(parentDel))
+      : deliveryPrefixForItem(it, 0);
+    const enriched = enrichItemFromDelivery(it, parentDel);
+    if (pushEquipmentMaterialForItem(dPrefix, enriched, parentDel)) {
+      eqMaterialItemIds.add(itemId);
+    }
+  });
+
+  if (!deliveries.length && !items.length) {
+    pushField(rows, "DeliveryNumber", firstDefined(root, ["DeliveryNumber"]));
+    pushSyncLineFields("1", root, null);
+  }
+
+  ensureMissingSyncBarcodeFields(rows, root, ["StorageUnitNumber", "TransporterBatchNumber", "BOL"]);
+
+  const nonShipment = rows.filter((r) => jsonBarcodeGroupKey(r.label) !== "ShipmentNumber");
+  if (!nonShipment.length) {
+    const deepDelivery = deepFindFirstValue(root, ["DeliveryNumber"]);
+    const deepMaterial = deepFindFirstValue(root, ["MaterialNumber"]);
+    const deepComp = deepFindFirstValue(root, ["CompartmentNumber"]);
+    const deepEvd = deepFindFirstValue(root, ["CompartmentEVDSeal"]);
+    const deepBatch = deepFindFirstValue(root, ["CompartmentBatch"]);
+    const deepHu = deepFindFirstValue(root, ["CompartmentHU"]);
+    pushField(rows, "DeliveryNumber", deepDelivery);
+    pushField(rows, "MaterialNumber", deepMaterial);
+    pushField(rows, "CompartmentNumber", deepComp);
+    pushField(rows, "CompartmentEVDSeal", deepEvd);
+    pushField(rows, "CompartmentBatch", deepBatch);
+    pushField(rows, "CompartmentHU", deepHu);
+    pushField(rows, "GTIN", deepFindFirstValue(root, ["GTIN", "Gtin"]));
+    pushField(rows, "EANNumber", deepFindFirstValue(root, ["EANNumber"]));
+    pushField(rows, "YSLDPackageCode", deepFindFirstValue(root, ["YSLDPackageCode"]));
+    pushField(rows, "StorageUnitNumber", deepFindFirstValue(root, ["StorageUnitNumber"]));
+    pushField(rows, "TransporterBatchNumber", deepFindFirstValue(root, ["TransporterBatchNumber"]));
+    pushField(rows, "TransporterSerialNumber", deepFindFirstValue(root, ["TransporterSerialNumber"]));
+    pushSerialField(
+      rows,
+      "ShipmentDeliveryItemSerialNumbers",
+      deepFindFirstValue(root, ["ShipmentDeliveryItemSerialNumbers"])
+    );
+    // No shipment-level EQ/Material — only ShipmentDeliveryItemId level
+  }
+
+  // Refresh counts from generated delivery/item bands
+  const deliveryNumbers = new Set();
+  const itemIds = new Set();
+  for (const r of rows) {
+    const g = jsonBarcodeGroupKey(r.label);
+    if (g === "DeliveryNumber" && r.value) deliveryNumbers.add(String(r.value));
+    const m = String(r.label).match(/ShipmentDeliveryItemId\s+(\S+)/);
+    if (m) itemIds.add(m[1]);
+  }
+  lastShipmentMeta = {
+    shipmentNumber,
+    expectedDeliveries,
+    expectedItems,
+    deliveryCount: Math.max(deliveries.length, deliveryNumbers.size),
+    itemCount: Math.max(items.length, itemIds.size)
+  };
+
+  return dedupeRows(rows);
+}
+
+function ensureMissingSyncBarcodeFields(rows, root, fields) {
+  for (const field of fields) {
+    const keys = field === "BOL" ? BOL_FIELD_KEYS : [field];
+    const already = rows.some((r) => {
+      const g = jsonBarcodeGroupKey(r.label);
+      return g === field || (field === "BOL" && (g === "BOL" || BOL_FIELD_KEYS.includes(g)));
+    });
+    if (already) continue;
+    const hosts = deepCollectObjectsWithHints(root, keys);
+    let added = false;
+    hosts.forEach((obj, index) => {
+      const val = firstDefined(obj, keys);
+      if (val == null) return;
+      const dn = firstDefined(obj, ["DeliveryNumber"]);
+      const prefix =
+        dn != null ? `${index + 1} (#${String(dn).trim()})` : String(index + 1);
+      pushField(rows, `${prefix} — ${field === "BOL" ? "BOL" : field}`, val);
+      added = true;
+    });
+    if (!added) {
+      pushField(rows, field === "BOL" ? "BOL" : field, deepFindFirstValue(root, keys));
+    }
+  }
+}
+
+function normalizeSyncShipmentPayload(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (Array.isArray(raw)) {
+    if (!raw.length) return null;
+    return normalizeSyncShipmentPayload(raw[0]);
+  }
+  if (
+    raw.ShipmentDetail ||
+    raw.ShipmentDeliveryDetails ||
+    raw.ShipmentDeliveryItemsDetails ||
+    raw.ShipmentNumber ||
+    raw.MaterialNumber
+  ) {
+    return raw;
+  }
+  const wrappers = ["data", "Data", "result", "Result", "payload", "Payload", "content", "Content", "response", "Response"];
+  for (const key of wrappers) {
+    const inner = raw[key];
+    if (inner && typeof inner === "object") {
+      const normalized = normalizeSyncShipmentPayload(inner);
+      if (normalized) return normalized;
+    }
+  }
+  const keys = Object.keys(raw);
+  if (keys.length === 1) {
+    const inner = raw[keys[0]];
+    if (inner && typeof inner === "object") {
+      const normalized = normalizeSyncShipmentPayload(inner);
+      if (normalized) return normalized;
+    }
+  }
+  // Keep original object so deep-scan can still walk it
+  return raw;
 }
 
 function dedupeRows(rows) {
   const seen = new Set();
   const out = [];
   for (const r of rows) {
-    const key = `${r.label}\0${r.value}`;
+    const group = jsonBarcodeGroupKey(r.label);
+    // Item-level equipment slash codes: keep each label even if values match across items
+    const key = group.startsWith("EquipmentNumber/")
+      ? `eq:${r.label}\0${r.value}`
+      : `${r.label}\0${r.value}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(r);
@@ -373,8 +1987,12 @@ function collectGenericJsonRows(data, maxLeaves = 120) {
 }
 
 function extractBarcodeRowsFromJson(data) {
+  // JSON paste/upload tab: classic NSAP rules first.
   const nsap = unwrapNsapPayload(data);
   if (nsap) return collectNsapBarcodeRows(nsap);
+  // Mobile/sync-shaped JSON without ShipmentDetail wrapper.
+  const syncRows = collectSyncShipmentBarcodeRows(data);
+  if (syncRows.length) return syncRows;
   return collectGenericJsonRows(data);
 }
 
@@ -424,17 +2042,27 @@ function jsonBarcodeGroupKey(label) {
 const BARCODE_GROUP_HUES = {
   ShipmentNumber: 205,
   DeliveryNumber: 230,
+  BOL: 218,
+  BolNumber: 218,
+  BOLNumber: 218,
+  BillOfLading: 218,
+  BillOfLadingNumber: 218,
   CompartmentNumber: 255,
   CompartmentBottomSeal: 278,
   CompartmentEVDSeal: 302,
   CompartmentBatch: 325,
+  CompartmentHU: 310,
   TransporterBatchNumber: 48,
+  TransporterSerialNumber: 28,
+  ShipmentDeliveryItemSerialNumbers: 8,
   StorageUnitNumber: 38,
   GTIN: 152,
   EANNumber: 172,
   YSLDPackageCode: 192,
   ProductNumber: 58,
+  MaterialNumber: 72,
   "EquipmentNumber/ProductNumber": 14,
+  "EquipmentNumber/MaterialNumber": 22,
   "EquipmentNumber/EANNumber": 108,
   "EquipmentNumber/GTIN": 128,
   "EquipmentNumber/FormulaCode": 2,
@@ -778,22 +2406,12 @@ function showApiStatus(msg, isError) {
 }
 
 function unwrapApiShipmentPayload(raw) {
-  if (!raw || typeof raw !== "object") return raw;
-  if (raw.ShipmentDetail) return raw;
-  if (raw.data && typeof raw.data === "object") {
-    if (raw.data.ShipmentDetail) return raw.data;
-    if (raw.data.result && typeof raw.data.result === "object" && raw.data.result.ShipmentDetail) {
-      return raw.data.result;
-    }
-  }
-  if (raw.result && typeof raw.result === "object" && raw.result.ShipmentDetail) return raw.result;
-  if (raw.payload && typeof raw.payload === "object" && raw.payload.ShipmentDetail) return raw.payload;
-  if (raw.Result && typeof raw.Result === "object" && raw.Result.ShipmentDetail) return raw.Result;
-  return unwrapNsapPayload(raw) || raw;
+  return normalizeSyncShipmentPayload(raw) || raw;
 }
 
 async function fetchShipmentAndGenerate() {
   clearJsonError();
+  clearShipmentDetails();
   showApiStatus("");
   const env = apiEnv?.value || "qa";
   const shipmentNumber = apiShipmentNumber?.value.trim() || "";
@@ -865,18 +2483,35 @@ async function fetchShipmentAndGenerate() {
     hideJsonFileRemarks();
     if (jsonFile) jsonFile.value = "";
 
-    lastJsonEntries = extractBarcodeRowsFromJson(payload);
-    if (!lastJsonEntries.length) {
-      showJsonError("Shipment loaded, but no barcode values were found.");
+    // API syncShipmentDetail: barcodes only for the mobile CT field list.
+    lastJsonEntries = collectSyncShipmentBarcodeRows(payload);
+    const detailPanels = collectShipmentDetailPanels(payload);
+    if (!lastJsonEntries.length && !detailPanels.length) {
+      clearShipmentDetails();
+      jsonBarcodeMount.innerHTML = "";
+      hideResultsSummary();
+      showJsonError("Shipment loaded, but no barcode values or details were found.");
       updateJsonExportSelect();
       showApiStatus("Loaded JSON, but no encodeable fields found.", true);
       return;
     }
-
-    renderJsonBarcodeGrid(lastJsonEntries);
-    const sn = getShipmentNumberFromParsed(payload) || shipmentNumber;
+    clearJsonError();
+    renderJsonBarcodeGrid(lastJsonEntries, detailPanels);
+    const sn =
+      getShipmentNumberFromParsed(payload) ||
+      pickFirstValue(payload.ShipmentDetail || payload, ["ShipmentNumber"]) ||
+      shipmentNumber;
     showApiStatus(
-      `Loaded ${sn} from ${env.toUpperCase()} · ${lastJsonEntries.length} barcodes generated.`,
+      `Loaded ${sn} from ${env.toUpperCase()} · ${lastJsonEntries.length} barcodes` +
+        (lastShipmentMeta
+          ? ` · deliveries ${lastShipmentMeta.deliveryCount}` +
+            (lastShipmentMeta.expectedDeliveries != null
+              ? `/${lastShipmentMeta.expectedDeliveries}`
+              : "") +
+            ` · items ${lastShipmentMeta.itemCount}` +
+            (lastShipmentMeta.expectedItems != null ? `/${lastShipmentMeta.expectedItems}` : "")
+          : "") +
+        (detailPanels.length ? ` · ${detailPanels.length} detail panels` : ""),
       false
     );
     setActiveTab("api");
@@ -903,7 +2538,10 @@ async function fetchShipmentAndGenerate() {
 }
 
 function hideResultsSummary() {
-  if (resultsSummary) resultsSummary.hidden = true;
+  if (resultsSummary) {
+    resultsSummary.hidden = true;
+    resultsSummary.querySelector(".results-count-note")?.remove();
+  }
   if (resultsStats) resultsStats.innerHTML = "";
   if (resultsLegend) resultsLegend.innerHTML = "";
 }
@@ -916,22 +2554,77 @@ function updateResultsSummary(entries, bands) {
   }
 
   const shipmentEntry = entries.find((e) => jsonBarcodeGroupKey(e.label) === "ShipmentNumber");
-  const shipmentValue = shipmentEntry?.value || "Shipment barcodes";
+  const metaSn = lastShipmentMeta?.shipmentNumber || "";
+  const shipmentValue = shipmentEntry?.value || metaSn || "Shipment barcodes";
   resultsShipmentTitle.textContent = shipmentValue;
 
-  const deliveryCount = bands.filter((b) => b.type === "delivery").length;
+  const deliveryBands = bands.filter((b) => b.type === "delivery").length;
+  const deliveryNumbers = new Set();
+  const itemIds = new Set();
+  for (const e of entries) {
+    if (jsonBarcodeGroupKey(e.label) === "DeliveryNumber" && e.value) {
+      deliveryNumbers.add(String(e.value).trim());
+    }
+    const m = String(e.label).match(/ShipmentDeliveryItemId\s+(\S+)/);
+    if (m) itemIds.add(m[1]);
+  }
+
+  const foundDeliveries = Math.max(
+    lastShipmentMeta?.deliveryCount || 0,
+    deliveryBands,
+    deliveryNumbers.size
+  );
+  const foundItems = Math.max(lastShipmentMeta?.itemCount || 0, itemIds.size);
+  const expectedDeliveries = lastShipmentMeta?.expectedDeliveries;
+  const expectedItems = lastShipmentMeta?.expectedItems;
+
+  const deliveryLabel =
+    expectedDeliveries != null ? `${foundDeliveries}/${expectedDeliveries}` : String(foundDeliveries);
+  const itemLabel = expectedItems != null ? `${foundItems}/${expectedItems}` : String(foundItems);
+
   resultsStats.innerHTML = "";
+  const shipmentStatus = findStatusValue(lastDetailPanels, "ShipmentStatus");
   const stats = [
     ["Barcodes", String(entries.length)],
-    ["Deliveries", String(deliveryCount)],
-    ["Sections", String(bands.length)]
+    ["Deliveries", deliveryLabel],
+    ["Items", itemLabel]
   ];
   for (const [k, v] of stats) {
     const el = document.createElement("div");
     el.className = "stat-pill";
+    const mismatch =
+      (k === "Deliveries" && expectedDeliveries != null && foundDeliveries !== expectedDeliveries) ||
+      (k === "Items" && expectedItems != null && foundItems !== expectedItems);
+    if (mismatch) el.classList.add("stat-pill-warn");
     el.innerHTML = `<span class="stat-label">${k}</span><span class="stat-value">${v}</span>`;
     resultsStats.appendChild(el);
   }
+  if (shipmentStatus) {
+    resultsStats.appendChild(createStatusBadge("Shipment Status", shipmentStatus));
+  }
+
+  const countNote = document.createElement("div");
+  countNote.className = "results-count-note";
+  if (
+    (expectedDeliveries != null && foundDeliveries !== expectedDeliveries) ||
+    (expectedItems != null && foundItems !== expectedItems)
+  ) {
+    countNote.classList.add("is-warn");
+    countNote.textContent =
+      `Count mismatch vs payload: expected ${expectedDeliveries ?? "?"} deliveries / ` +
+      `${expectedItems ?? "?"} items, generated ${foundDeliveries} deliveries / ${foundItems} items.`;
+  } else if (expectedDeliveries != null || expectedItems != null) {
+    countNote.classList.add("is-ok");
+    countNote.textContent =
+      `Matched payload counts` +
+      (metaSn ? ` for ${metaSn}` : "") +
+      `: ${foundDeliveries} deliveries, ${foundItems} items.`;
+  } else {
+    countNote.textContent = `${foundDeliveries} deliveries · ${foundItems} items`;
+  }
+  // Replace any previous note
+  resultsSummary.querySelector(".results-count-note")?.remove();
+  resultsSummary.appendChild(countNote);
 
   const seen = new Set();
   resultsLegend.innerHTML = "";
@@ -953,6 +2646,9 @@ function appendBandHeader(parent, band, entries) {
   const header = document.createElement("div");
   header.className = "band-header";
 
+  const titleRow = document.createElement("div");
+  titleRow.className = "band-title-row";
+
   const title = document.createElement("div");
   title.className = "band-title";
   const count = document.createElement("span");
@@ -963,7 +2659,6 @@ function appendBandHeader(parent, band, entries) {
     title.textContent = "Shipment";
     header.classList.add("band-header-shipment");
   } else {
-    const first = entries[band.items[0]];
     const deliveryLabel =
       band.key.startsWith("Unmatched")
         ? band.key
@@ -981,7 +2676,45 @@ function appendBandHeader(parent, band, entries) {
     }
   }
 
-  header.append(title, count);
+  titleRow.appendChild(title);
+
+  const related =
+    band.type === "delivery"
+      ? panelsForMatchKey(lastDetailPanels, band.key)
+      : lastDetailPanels.filter((p) => p.matchKey === "^shipment");
+
+  if (band.type === "shipment") {
+    const shipmentStatus =
+      findStatusValue(related, "ShipmentStatus") ||
+      findStatusValue(lastDetailPanels, "ShipmentStatus");
+    if (shipmentStatus) {
+      titleRow.appendChild(createStatusBadge("Shipment Status", shipmentStatus));
+    }
+  } else {
+    const deliveryStatus = findStatusValue(related, "DeliveryStatus");
+    if (deliveryStatus) {
+      titleRow.appendChild(createStatusBadge("Delivery Status", deliveryStatus));
+    }
+    if (panelsHaveDropOff(related)) {
+      const dropBadge = createStatusBadge("Drop Off", "Yes");
+      dropBadge.classList.add("status-badge-dropoff");
+      titleRow.appendChild(dropBadge);
+      header.classList.add("band-header-dropoff");
+      parent.classList.add("json-barcode-band-dropoff");
+    }
+  }
+
+  if (related.length) {
+    const modalTitle =
+      band.type === "delivery" ? `Delivery info · ${band.key}` : "Shipment info";
+    titleRow.appendChild(
+      createInfoIconButton(modalTitle, () => {
+        openDetailsModal(modalTitle, related);
+      })
+    );
+  }
+
+  header.append(titleRow, count);
   parent.appendChild(header);
 }
 
@@ -1432,28 +3165,33 @@ function downloadLastJsonBarcodesCsv() {
   URL.revokeObjectURL(a.href);
 }
 
-function renderJsonBarcodeGrid(entries) {
+function renderJsonBarcodeGrid(entries, detailPanels) {
   jsonBarcodeMount.innerHTML = "";
-  const bands = groupEntriesIntoLayoutBands(entries);
-  updateResultsSummary(entries, bands);
+  if (detailPanels !== undefined) {
+    renderShipmentDetails(detailPanels);
+  }
+  const list = entries || [];
+  const bands = groupEntriesIntoLayoutBands(list);
+  updateResultsSummary(list, bands);
+  renderDetailsInfoFallback(list);
 
   for (const band of bands) {
     const bandEl = document.createElement("section");
     bandEl.className = `json-barcode-band json-barcode-band-${band.type}`;
     bandEl.dataset.bandKey = band.key;
-    appendBandHeader(bandEl, band, entries);
+    appendBandHeader(bandEl, band, list);
 
     const cards = document.createElement("div");
     cards.className = "band-cards";
     let prevBlock = null;
 
     for (const i of band.items) {
-      const blockKey = jsonBarcodeBlockKey(entries[i].label);
+      const blockKey = jsonBarcodeBlockKey(list[i].label);
       if (band.type === "delivery" && prevBlock !== null && shouldInsertBarcodeItemGap(prevBlock, blockKey)) {
         appendJsonBarcodeGapRow(cards);
       }
       prevBlock = blockKey;
-      appendJsonBarcodeCard(cards, entries, i);
+      appendJsonBarcodeCard(cards, list, i);
     }
 
     bandEl.appendChild(cards);
@@ -1462,10 +3200,28 @@ function renderJsonBarcodeGrid(entries) {
   updateJsonExportSelect();
 }
 
+function generateFromParsedData(data) {
+  const detailPanels = collectShipmentDetailPanels(data);
+  lastJsonEntries = extractBarcodeRowsFromJson(data);
+  if (!lastJsonEntries.length && !detailPanels.length) {
+    clearShipmentDetails();
+    jsonBarcodeMount.innerHTML = "";
+    hideResultsSummary();
+    showJsonError("No barcode values or shipment details found.");
+    updateJsonExportSelect();
+    return false;
+  }
+  clearJsonError();
+  renderJsonBarcodeGrid(lastJsonEntries, detailPanels);
+  return true;
+}
+
 function runJsonGenerate() {
   clearJsonError();
   jsonBarcodeMount.innerHTML = "";
+  clearShipmentDetails();
   lastJsonEntries = null;
+  hideResultsSummary();
   updateJsonExportSelect();
 
   let text = jsonPaste.value.trim();
@@ -1477,13 +3233,7 @@ function runJsonGenerate() {
         const fileText = String(reader.result || "");
         jsonPaste.value = fileText;
         const data = JSON.parse(fileText);
-        lastJsonEntries = extractBarcodeRowsFromJson(data);
-        if (!lastJsonEntries.length) {
-          showJsonError("No string values found to encode.");
-          updateJsonExportSelect();
-          return;
-        }
-        renderJsonBarcodeGrid(lastJsonEntries);
+        if (!generateFromParsedData(data)) updateJsonExportSelect();
       } catch {
         showJsonError("Invalid JSON in file.");
         updateJsonExportSelect();
@@ -1504,22 +3254,17 @@ function runJsonGenerate() {
     data = JSON.parse(text);
   } catch {
     // Fallback for direct/manual values now that the old generator panel is removed.
+    clearShipmentDetails();
     lastJsonEntries = collectPlainTextRows(text);
     if (!lastJsonEntries.length) {
       showJsonError("Paste JSON, choose a file, or enter a plain value.");
       return;
     }
-    renderJsonBarcodeGrid(lastJsonEntries);
+    renderJsonBarcodeGrid(lastJsonEntries, []);
     return;
   }
 
-  lastJsonEntries = extractBarcodeRowsFromJson(data);
-  if (!lastJsonEntries.length) {
-    showJsonError("No string values found to encode.");
-    updateJsonExportSelect();
-    return;
-  }
-  renderJsonBarcodeGrid(lastJsonEntries);
+  generateFromParsedData(data);
 }
 
 jsonGenerateBtn.addEventListener("click", runJsonGenerate);
@@ -1527,6 +3272,7 @@ jsonGenerateBtn.addEventListener("click", runJsonGenerate);
 jsonClearBtn.addEventListener("click", () => {
   clearJsonError();
   jsonBarcodeMount.innerHTML = "";
+  clearShipmentDetails();
   lastJsonEntries = null;
   hideResultsSummary();
   updateJsonExportSelect();
@@ -1750,6 +3496,15 @@ document.querySelectorAll(".app-tab").forEach((btn) => {
   btn.addEventListener("click", () => {
     setActiveTab(btn.dataset.tab || "json");
   });
+});
+
+document.querySelectorAll("[data-close-details-modal]").forEach((el) => {
+  el.addEventListener("click", () => closeDetailsModal());
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && detailsModal && !detailsModal.hidden) {
+    closeDetailsModal();
+  }
 });
 
 setActiveTab("json");
