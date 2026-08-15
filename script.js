@@ -2151,6 +2151,47 @@ function parseLabelContext(label) {
   };
 }
 
+/** @type {boolean | null} */
+let localProxyAvailable = null;
+
+function isLikelyLocalHostname(host) {
+  const h = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h === "0.0.0.0" ||
+    h === "::1" ||
+    h.endsWith(".local")
+  );
+}
+
+function shouldUseLocalApiProxy() {
+  if (window.location.protocol === "file:") return false;
+  if (localProxyAvailable === true) return true;
+  if (localProxyAvailable === false) return isLikelyLocalHostname(window.location.hostname);
+  return isLikelyLocalHostname(window.location.hostname);
+}
+
+async function detectLocalApiProxy() {
+  if (window.location.protocol === "file:") {
+    localProxyAvailable = false;
+    return false;
+  }
+  try {
+    const res = await fetch("/api-proxy/health", { method: "GET", cache: "no-store" });
+    if (!res.ok) {
+      localProxyAvailable = false;
+      return false;
+    }
+    const data = await res.json().catch(() => null);
+    localProxyAvailable = Boolean(data && data.ok);
+    return localProxyAvailable;
+  } catch {
+    localProxyAvailable = false;
+    return false;
+  }
+}
+
 function buildShipmentApiUrl(env, shipmentNumber, { useProxy = shouldUseLocalApiProxy() } = {}) {
   const sn = encodeURIComponent(String(shipmentNumber || "").trim());
   const pathAndQuery = `/api/syncShipmentDetail/${sn}?getFullDetail=True`;
@@ -2160,11 +2201,6 @@ function buildShipmentApiUrl(env, shipmentNumber, { useProxy = shouldUseLocalApi
   }
   const base = API_ENV_HOSTS[env] || API_ENV_HOSTS.qa;
   return `${base}${pathAndQuery}`;
-}
-
-function shouldUseLocalApiProxy() {
-  const host = window.location.hostname;
-  return host === "localhost" || host === "127.0.0.1";
 }
 
 function collectApiErrorText(node, depth = 0) {
@@ -2379,15 +2415,18 @@ function startTokenExpiryWatcher() {
   tokenExpiryTimer = setInterval(updateTokenExpiryUi, 15000);
 }
 
-function updateApiUrlPreview() {
+async function updateApiUrlPreview() {
   if (!apiUrlPreview) return;
   const env = apiEnv?.value || "qa";
   const sn = apiShipmentNumber?.value.trim() || "{shipmentId}";
   const direct = buildShipmentApiUrl(env, sn, { useProxy: false });
+  await detectLocalApiProxy();
   if (shouldUseLocalApiProxy()) {
     apiUrlPreview.textContent = `${direct}  ·  via local GET proxy`;
+  } else if (window.location.protocol === "file:") {
+    apiUrlPreview.textContent = `${direct}  ·  open http://localhost:8080 (file:// cannot proxy)`;
   } else {
-    apiUrlPreview.textContent = direct;
+    apiUrlPreview.textContent = `${direct}  ·  CORS will block unless you use python3 serve.py`;
   }
 }
 
@@ -2438,10 +2477,18 @@ async function fetchShipmentAndGenerate() {
     return;
   }
 
+  await detectLocalApiProxy();
   const url = buildShipmentApiUrl(env, shipmentNumber);
   apiFetchBtn.disabled = true;
   apiFetchBtn.textContent = "Fetching…";
-  showApiStatus(`Calling ${env.toUpperCase()}…`);
+  if (window.location.protocol === "file:" || !shouldUseLocalApiProxy()) {
+    showApiStatus(
+      `Calling ${env.toUpperCase()} directly (CORS likely). Use http://localhost:8080 via python3 serve.py.`,
+      true
+    );
+  } else {
+    showApiStatus(`Calling ${env.toUpperCase()} via local proxy…`);
+  }
 
   try {
     sessionStorage.setItem(TOKEN_SESSION_KEY, token);
@@ -2519,14 +2566,18 @@ async function fetchShipmentAndGenerate() {
     const raw = err?.message || String(err);
     let msg = raw;
     if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(raw)) {
-      if (shouldUseLocalApiProxy()) {
+      if (window.location.protocol === "file:") {
+        msg =
+          `Cannot fetch ${env.toUpperCase()} from a file:// page (CORS). ` +
+          "Run `python3 serve.py` and open http://localhost:8080/";
+      } else if (shouldUseLocalApiProxy()) {
         msg =
           `GET request failed on ${env.toUpperCase()}. Restart with \`python3 serve.py\` ` +
-          "(not plain http.server) so the local API proxy can bypass CORS.";
+          "(not plain http.server) and open http://localhost:8080/ so the local API proxy can bypass CORS.";
       } else {
         msg =
           `GET request blocked by CORS on ${env.toUpperCase()}. ` +
-          "The API must allow this website origin, or run locally with \`python3 serve.py\`.";
+          "Azure does not allow this website origin. Run `python3 serve.py` and open http://localhost:8080/ (hard-refresh).";
       }
     }
     showApiStatus(msg, true);
@@ -3489,7 +3540,10 @@ function setActiveTab(tabName) {
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   }
-  if (tabName === "api") updateTokenExpiryUi();
+  if (tabName === "api") {
+    updateTokenExpiryUi();
+    void detectLocalApiProxy().then(() => updateApiUrlPreview());
+  }
 }
 
 document.querySelectorAll(".app-tab").forEach((btn) => {

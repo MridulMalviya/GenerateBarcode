@@ -41,6 +41,10 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_error(404)
 
     def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path in ("/api-proxy/health", "/api-proxy/health/"):
+            self.send_json(200, {"ok": True, "proxy": True})
+            return
         if self.path.startswith("/api-proxy/"):
             self.proxy_get()
             return
@@ -117,9 +121,10 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"EVD Barcode Generator running at http://localhost:{PORT}/")
     print("API proxy path: /api-proxy/{env}/api/...")
+    print("Open that URL (not a file:// page or GitHub Pages) so DEV/QA fetches skip CORS.")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
